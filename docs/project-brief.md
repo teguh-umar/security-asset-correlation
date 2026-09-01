@@ -28,17 +28,23 @@ risk model. SAC is a **feeder**, not a risk system.
 
 ## 3. Scope
 
-### In scope — four modules (build order)
+### In scope — three modules (build order)
 
 | # | Module | Data source | Risk trigger | Data availability |
 |---|---|---|---|---|
 | 1 | **EOL/EOS** | GLPI software/OS/model inventory + `endoflife.date` API | EOL/EOS date < today (or < horizon) | 100% GLPI + 1 free API |
 | 2 | **License Compliance** | native GLPI `glpi_softwarelicenses` / install counts | installs > licensed seats | 100% GLPI |
-| 3 | **Patch Compliance** | patch-status source, TBD (WSUS / Sangfor SCP / other) | pending patches > threshold, or age > SLA | needs external source |
-| 4 | **Config Compliance** | OpenSCAP + SCAP Security Guide (CIS-aligned) results XML | benchmark pass score < threshold; per-rule fails | needs OpenSCAP rollout |
+| 3 | **Config + Patch Compliance** | OpenSCAP: CIS XCCDF (config) **+ distro OVAL feeds** (patch, RHEL OVAL / Ubuntu USN) | benchmark score < threshold; per-rule fails; missing security patches | needs OpenSCAP local cron |
 
 Start with **1 + 2** — fully derivable from GLPI data plus one free API, no
 infrastructure dependency.
+
+**Decision (2026-09-01) — patch compliance is not a separate module.** For Linux,
+"is this host missing security patches" is authoritatively answered by
+`oscap oval eval` against distro OVAL content — the same `oscap` run and the same
+collection path as CIS config checks. So patch folds into module 3. Windows patch
+compliance (inventoried KBs vs a "latest cumulative update per build" baseline) is
+a thin later track, listed under §10 Deferred.
 
 ### Out of scope
 
@@ -67,14 +73,32 @@ infrastructure dependency.
 
 - **Namespace (claimed, hub §2):** tables `glpi_plugin_sac_*`, config context
   `plugin:sac`, PSR-4 `GlpiPlugin\Sac\` → `src/`, rights `plugin_sac_*`, cron
-  `GlpiPlugin\Sac\Cron::*`, menu node TBD (Management → Security Assessment, or a
-  tab under Risk Register).
+  `GlpiPlugin\Sac\Cron::*`.
+- **Menu node (decided 2026-09-01): own node, Management → Security Assessment.**
+  Not a tab under Risk Register — SAC must not depend on `riskregister`'s UI
+  loading; the two integrate through Finding data, not the menu. SAC owns its own
+  rights and its own operational surface (module config, run status, raw signal
+  review, unmatched-asset reconcile, watermarks).
 - **Per-module cron task** pulls its source, correlates to `Computer` (reusing the
   approach in `integrasipaman/inc/correlation.class.php` — parse NAME/IP → GLPI
   native), writes findings.
 - **SAC keeps its own tables** for raw signal state + last-run watermarks (ETL
   watermark pattern, like `jumpserver_pbi`), so re-runs are incremental and
   idempotent.
+
+### OpenSCAP collection — tiered (decided 2026-09-01)
+
+- **Tier 1 (build now):** `oscap` runs locally on each host via cron (root, local
+  — zero inbound access to the host). It writes a one-line summary (score,
+  pass/fail counts, benchmark id, timestamp). **GLPI Agent's Collect task** reads
+  that line into a per-`Computer` field. Most secure (no SSH keys, no remote exec,
+  nothing listening) and easiest (transport already deployed on every server).
+  Yields a compliance % per host and a coarse Finding ("host X config score 72%").
+  Requires GLPI Inventory Plugin (installed — verify) and the **Deploy** task must
+  stay disabled (RCE vector; Collect is read-only).
+- **Tier 2 (deferred, §10):** pull the full `results.xml`/ARF for per-rule fails
+  mapped to CIS control numbers → granular Findings. Transport: Kerberos/GSSAPI
+  where FreeIPA is deployed (DCI Cibitung first), plain SSH elsewhere as interim.
 
 ## 5. Integration contract with `riskregister`
 
@@ -133,18 +157,25 @@ Peer sessions: `risk-register-dashboard-df` (riskregister),
 
 ## 8. Open questions
 
-1. **Patch Compliance source** — WSUS? Sangfor SCP? Something else? Determines
-   whether module 3 is native-ish or needs a connector.
-2. **Menu placement** — own node (Management → Security Assessment) vs a tab under
-   Risk Register. Affects rights design.
-3. **OpenSCAP file collection** — GLPI Agent Collect can only extract one summary
-   line; full `results.xml` needs SSH pull. FreeIPA/Kerberos vs plain SSH (GLPI
-   has full server access). Pilot: DCI Cibitung, RHEL first.
-4. **datainjection on GLPI 11** — one VM check settles whether the CSV path is
+- ~~**Patch Compliance source**~~ — RESOLVED 2026-09-01: not a separate module;
+  Linux patch = `oscap oval eval` inside module 3; Windows patch deferred (§10).
+- ~~**Menu placement**~~ — RESOLVED 2026-09-01: own node, Management → Security
+  Assessment.
+- ~~**OpenSCAP file collection**~~ — RESOLVED 2026-09-01: Tier 1 (local cron +
+  GLPI Agent Collect summary line) now; Tier 2 (full `results.xml` pull) deferred
+  to §10.
+
+Still open:
+
+1. **datainjection on GLPI 11** — one VM check settles whether the CSV path is
    permanent or an interim measure for both SAC and riskregister.
-5. **Entity model** — single-entity or per-site findings?
-6. **Finding lifecycle** — when a signal clears (software patched, license bought),
+2. **Entity model** — single-entity or per-site findings?
+3. **Finding lifecycle** — when a signal clears (software patched, license bought),
    does SAC close the Finding, or leave that to the risk owner?
+4. **EOL/EOS correlation grain** — per software/version, per OS, per hardware
+   model, or all three? (module 1 brainstorm)
+5. **License Compliance data completeness** — are `glpi_softwarelicenses` seat
+   counts actually maintained on this instance, or sparse? (module 2 brainstorm)
 
 ## 9. Next steps
 
@@ -155,3 +186,19 @@ Peer sessions: `risk-register-dashboard-df` (riskregister),
 3. Write the plan.
 4. Implement modules 1–2, scaffold plugin structure, `selfcheck.php`.
 5. VM verification pass alongside `riskregister`'s.
+
+## 10. Deferred / future
+
+- **OpenSCAP Tier 2** — full `results.xml`/ARF pull for per-rule CIS-mapped
+  Findings. Transport: Kerberos/GSSAPI (FreeIPA, DCI Cibitung first) or SSH.
+- **Windows patch compliance** — inventoried hotfix KBs vs a maintained "latest
+  cumulative update per OS build" baseline.
+- **Windows CIS config compliance** — SSG has no official Windows content; needs
+  Microsoft Security Compliance Toolkit / CIS-CAT Lite / PowerShell DSC as a
+  separate track.
+- **CVE-to-asset correlation** — no viable GLPI 11 path today (`glpi-cve-plugin`
+  archived 2021, `cve-search`+MongoDB out of scope). Revisit if a maintained
+  option appears.
+- **integrasipaman → Finding** — high-risk terminal command on a production asset
+  as a candidate Finding (owned by the integrasipaman side; noted so neither
+  designs it away).
