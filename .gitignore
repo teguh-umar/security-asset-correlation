@@ -1,0 +1,31 @@
+# Dependencies
+/vendor/
+/node_modules/
+composer.phar
+
+# Build / dist
+/dist/
+*.tar.gz
+*.zip
+
+# GLPI plugin runtime
+/files/
+/config/
+*.log
+
+# Local scan artifacts (OpenSCAP results, CSV exports)
+/tmp/
+*.results.xml
+*.arf.xml
+/exports/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
