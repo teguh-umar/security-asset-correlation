@@ -2,9 +2,9 @@
 
 **Plugin:** Security-Asset Correlation (SAC)
 **Repo:** `teguh-umar/security-asset-correlation` (private)
-**Session:** `sec-assessmant-korelasi-cve-cc`
-**Status:** Brainstorm stage — repo scaffolded, no plugin code
-**Last updated:** 2026-09-01
+**Session:** `sec-assessmant-korelasi-cve-78` `[5c886d]` (was `-cc`)
+**Status:** Design stage — Module 1 design complete, no plugin code yet
+**Last updated:** 2026-09-03
 
 ---
 
@@ -32,7 +32,7 @@ risk model. SAC is a **feeder**, not a risk system.
 
 | # | Module | Data source | Risk trigger | Data availability |
 |---|---|---|---|---|
-| 1 | **EOL/EOS** | GLPI software/OS/model inventory + `endoflife.date` API | EOL/EOS date < today (or < horizon) | 100% GLPI + 1 free API |
+| 1 | **EOL/EOS** | `fields` "LifeCycle" `EndOfLife` date on Operating Systems + `endoflife.date` API fallback; native warranty for hardware | resolved EOL date < today (or < horizon) | 100% GLPI + 1 free API |
 | 2 | **License Compliance** | native GLPI `glpi_softwarelicenses` / install counts | installs > licensed seats | 100% GLPI |
 | 3 | **Config + Patch Compliance** | OpenSCAP: CIS XCCDF (config) **+ distro OVAL feeds** (patch, RHEL OVAL / Ubuntu USN) | benchmark score < threshold; per-rule fails; missing security patches | needs OpenSCAP local cron |
 
@@ -44,7 +44,7 @@ infrastructure dependency.
 `oscap oval eval` against distro OVAL content — the same `oscap` run and the same
 collection path as CIS config checks. So patch folds into module 3. Windows patch
 compliance (inventoried KBs vs a "latest cumulative update per build" baseline) is
-a thin later track, listed under §10 Deferred.
+a thin later track, listed under §11 Deferred.
 
 ### Out of scope
 
@@ -56,19 +56,19 @@ a thin later track, listed under §10 Deferred.
 - Being an audit-grade CIS assessor — SSG is not CIS-CAT Pro; internal use, note
   the source on formal evidence
 
-## 4. Architecture (proposed, not final)
+## 4. Architecture
 
 ```
-  GLPI inventory ──┐
-  endoflife.date ──┤
-  patch source   ──┼──▶  SAC cron tasks  ──▶  normalise to Finding rows  ──▶  CSV
-  OpenSCAP XML   ──┘         (per module)          (deterministic code)        │
-                                                                               ▼
-                              riskregister: ImportSupport upsert on `code`
-                              + Management → Risk Register → Reconcile
+  fields "LifeCycle" ─┐
+  endoflife.date API ─┤
+  native warranty    ─┼─▶  SAC cron tasks  ─▶  normalise to Finding input  ─▶  direct in-process
+  OpenSCAP summary   ─┘      (per module)       (deterministic `code`)          itemtype API
+                                                                                    │
+                              \GlpiPlugin\Riskregister\Finding->add()/update()  ◀────┘
+                              + Finding_Item links + raw_asset_text for unresolved
                                         │
                                         ▼
-                              Finding → Risk (5×5, ISO 27001 / CIS v8), review cron
+                              Finding → Risk (5×5, ISO 27001 / CIS v8), review cron  [riskregister]
 ```
 
 - **Namespace (claimed, hub §2):** tables `glpi_plugin_sac_*`, config context
@@ -82,9 +82,22 @@ a thin later track, listed under §10 Deferred.
 - **Per-module cron task** pulls its source, correlates to `Computer` (reusing the
   approach in `integrasipaman/inc/correlation.class.php` — parse NAME/IP → GLPI
   native), writes findings.
-- **SAC keeps its own tables** for raw signal state + last-run watermarks (ETL
-  watermark pattern, like `jumpserver_pbi`), so re-runs are incremental and
-  idempotent.
+- **SAC keeps its own tables** for signal mapping, API cache, reconcile queue, and
+  last-run watermarks, so re-runs are incremental and idempotent.
+
+### Design principle — upgrade resilience (decided 2026-09-01)
+
+SAC must survive GLPI minor/major version bumps (and a future core shift of more
+rendering to Twig) with minimal rework:
+
+- **Only call GLPI core helpers for form controls** — `Dropdown::showFromArray()`,
+  `Class::dropdown()`, or Twig `fields.*` macros. All delegate to core internals;
+  when core moves them to Twig, SAC's call sites are unaffected.
+- **Never hand-roll `<select>` / form HTML in strings** — the one pattern that
+  breaks on a version bump.
+- **One render site per itemtype** (`showForm()` or a thin per-field helper) so a
+  deliberate full-Twig rewrite of a screen is a single localized change.
+- Matches `riskregister`'s existing pattern — suite-consistent and upgrade-safe.
 
 ### OpenSCAP collection — tiered (decided 2026-09-01)
 
@@ -96,98 +109,233 @@ a thin later track, listed under §10 Deferred.
   Yields a compliance % per host and a coarse Finding ("host X config score 72%").
   Requires GLPI Inventory Plugin (installed — verify) and the **Deploy** task must
   stay disabled (RCE vector; Collect is read-only).
-- **Tier 2 (deferred, §10):** pull the full `results.xml`/ARF for per-rule fails
+- **Tier 2 (deferred, §11):** pull the full `results.xml`/ARF for per-rule fails
   mapped to CIS control numbers → granular Findings. Transport: Kerberos/GSSAPI
   where FreeIPA is deployed (DCI Cibitung first), plain SSH elsewhere as interim.
 
 ## 5. Integration contract with `riskregister`
 
-Confirmed by the `risk-register-dashboard-df` session:
+Per the **pinned external `Finding` API contract** (hub §7, 2026-09-01, and hub §5
+as updated by `risk-register-dashboard-06` on 2026-09-03):
 
-- **Pipeline = CSV path.** SAC writes a CSV; import via
-  `\GlpiPlugin\Riskregister\Import\ImportSupport` (`categoryIdByName`,
-  `placeholderOwnerGroupId`) + the Reconcile page for unmatched asset/owner text.
-- **`Finding` has UNIQUE `(entities_id, code)`.** SAC must set a **stable,
-  deterministic `code`** per finding for idempotent upsert, e.g.
-  `SAC-EOL-<computers_id>-<software-slug>` (hash the tail if long).
-- **`scope_label` must be non-empty** (asset name / area).
-- **Enums:** `severity` = `Critical|High|Medium|Low|Info`,
-  `status` = `Open|In Treatment|Treated|Closed`.
+- **Primary path = direct in-process itemtype API** (not CSV). SAC's cron runs in
+  the same GLPI process:
+
+  ```php
+  if (!\Plugin::isPluginActive('riskregister')) { /* log "skipped", exit 0 */ }
+
+  use GlpiPlugin\Riskregister\Finding;
+  use GlpiPlugin\Riskregister\Import\ImportSupport;
+
+  $f   = new Finding();
+  $hit = $f->find(['entities_id' => $eid, 'code' => $code]);
+  $hit ? $f->update(['id' => array_key_first($hit)] + $input) : $f->add($input);
+
+  // link resolved assets:
+  (new \GlpiPlugin\Riskregister\Finding_Item())->add([
+      'plugin_riskregister_findings_id' => $id,
+      'itemtype' => 'Computer', 'items_id' => $cid,
+  ]);
+  ```
+
+- **`Finding` fields** SAC sets: `name` (**required**, ≤255), `code` (**required**,
+  deterministic, ≤50, unique key `(entities_id, code)`), `scope_label`
+  (**required**, non-empty), `severity` (`Critical|High|Medium|Low|Info`),
+  `status` (`Open|In Treatment|Treated|Closed` — set on create only),
+  `plugin_riskregister_riskcategories_id` (via `ImportSupport::categoryIdByName()`),
+  `content`, `cause`, `recommendation`, `date_due`, `assessment_ref` (source
+  marker, e.g. `SAC/eol`), `raw_asset_text` (unresolved hosts → Reconcile).
+  **Never** set `id`, `is_deleted`, `date_creation`, `date_mod`.
+- **Active detection:** `\Plugin::isPluginActive('riskregister')` —
+  `class_exists('PluginRiskregisterFinding')` is always false (no legacy alias).
+- **CSV export** is kept as a **secondary / audit** output only (and for the
+  external-evidence use case, e.g. the server-refresh KAK). Not the pipeline.
 - **`datainjection` / `FindingInjection` is dormant** — not used unless a
   VM-HQ-GLPI check proves GLPI 11 injection types work.
+- **Risk categories** — riskregister seeds 4 flat `RiskCategory` names in its
+  **v1.1.0** install seed (agreed 2026-09-03, hub §7):
+  `Obsolescence` (M1), `License Compliance` (M2), `Patch Compliance` (M3 patch),
+  `Configuration Compliance` (M3 config). SAC calls `categoryIdByName()` with these
+  exact strings; auto-create is the harmless fallback until the seed commits.
 - **CIS mapping:** SCAP `<reference>` CIS sub-control refs (e.g. `5.2`) truncate
   to the parent control number to match `riskregister`'s seeded `cis_v8.csv`
   (top-level controls 1–18 only). Ask `riskregister` to seed sub-controls if finer
-  grain is needed.
-- Fields SAC may set on `Finding`: `name, code, plugin_riskregister_riskcategories_id,
-  content, cause, scope_label, severity, recommendation, status, date_due,
-  assessment_ref, raw_asset_text, raw_control_text`.
+  grain is needed (module 3).
+- **riskregister does NOT auto-promote Finding → Risk** — a human does that. SAC's
+  job ends at emitting a Finding.
 
-## 6. Deployment target — VM-HQ-GLPI
+## 6. Module 1 — EOL/EOS (design complete 2026-09-03)
 
-Shared with `integrasipaman` (live) and `riskregister` (pending verification).
-Facts that constrain SAC (hub §3):
+### 6.1 Data flow
+
+Cron task `GlpiPlugin\Sac\Cron::EolScan`, **weekly**.
+
+1. **Build OS→assets map** — `glpi_operatingsystems` joined through
+   `glpi_items_operatingsystems` → per OS, the list of asset IDs + their entities.
+2. **Resolve the EOL date per OS**, in priority order:
+   - **a.** `fields` "LifeCycle" container on Operating Systems (Block 16) →
+     `EndOfLife` **Date** field, read-only from the fields-generated table (name to
+     confirm on VM, likely `glpi_plugin_fields_operatingsystemlifecycles`). If set
+     → use it. Source tag: `lifecycle`.
+   - **b.** else — look up the OS in `glpi_plugin_sac_eolmap` → read `eol_date`
+     from `glpi_plugin_sac_eolcache`. Source tag: `endoflife.date`.
+   - **c.** else — write/refresh a `glpi_plugin_sac_reconcile` row, emit no Finding.
+3. **Compute severity** from the resolved date vs. run date:
+
+   | Condition | Severity |
+   |---|---|
+   | EOL date in the past | `Critical` |
+   | EOL within 90 days | `High` |
+   | EOL within 180 days | `Medium` |
+   | EOL within 365 days | `Low` |
+   | EOL > 365 days away | *no Finding* |
+
+4. **Upsert one Finding per (OS, entity)** where severity ≠ none:
+   - `code` = `SAC-EOL-OS-<operatingsystems_id>` (stable, deterministic, ≤50)
+   - `name` = e.g. `"EOL: Windows Server 2012 R2"`
+   - `scope_label` = `"<OS name> ×<host count>"`
+   - `severity` = computed
+   - `content` = OS name, resolved EOL date, source, list of affected hostnames
+   - `assessment_ref` = `"SAC/eol"`
+   - category via `ImportSupport::categoryIdByName("Obsolescence", $eid)`
+   - `status` = `Open` **on create only** — never touched on update
+   - `Finding_Item` rows for each **resolved** Computer; `raw_asset_text` carries
+     any hostnames that don't resolve (→ riskregister Reconcile)
+5. **Hardware EOL** — native warranty (`warranty_date` + `warranty_duration`) on
+   Computer; a per-asset Finding when warranty end is past / near. (Hardware-vendor
+   lifecycle source deferred, §11.)
+6. **Signal cleared** (EOL date pushed past 365 days, or OS gone from inventory):
+   SAC appends a "signal cleared on `<date>`" line to `content` and stops
+   re-asserting. It does **not** auto-close — the risk owner closes.
+
+### 6.2 SAC's own tables
+
+All `glpi_plugin_sac_*`, created by the `Migration` helper (hub §4). Timestamp
+columns use GLPI's canonical `timestamp NULL DEFAULT NULL` (hub §7 —
+`migration:timestamps` gotcha).
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `glpi_plugin_sac_eolmap` | OS → `endoflife.date` identity, admin-confirmed via Reconcile | `operatingsystems_id`, `eol_product` (slug), `eol_cycle`, `confidence` (`auto`/`confirmed`), `confirmed_by`, `date_confirmed` |
+| `glpi_plugin_sac_eolcache` | local mirror of `endoflife.date`, own refresh cron | `eol_product`, `eol_cycle`, `eol_date`, `eos_date`, `support_date`, `is_lts`, `date_fetched` |
+| `glpi_plugin_sac_reconcile` | unresolved items needing an admin decision — **generic across modules** | `signal_type` (`eol`/`license`/`config`), `ref_itemtype`, `ref_id`, `reason` (`no_mapping`/`bad_date`/`api_disagreement`), `detail`, `date_firstseen`, `date_lastseen`, `is_resolved` |
+| `glpi_plugin_sac_run` | per-module run audit / watermark | `module`, `date_start`, `date_end`, `status` (`running`/`ok`/`error`/`stale`), `counts_json` (scanned / findings_upserted / reconcile_open / errors) |
+
+`eolcache` is the only module-1-specific table. `eolmap`/`reconcile` are built
+generic (`signal_type` + polymorphic `ref_*`) so modules 2–3 reuse them.
+
+### 6.3 Error handling
+
+| Condition | Behavior |
+|---|---|
+| `endoflife.date` unreachable / timeout / bad HTTP | Use existing cache; log warning; **don't fail the run**. `errors++`. |
+| LifeCycle `EndOfLife` = `0000-00-00` / empty / garbage | Skip OS; `_reconcile` row `reason=bad_date`. |
+| `fields` inactive or LifeCycle table missing | `$DB->tableExists()` guard → `endoflife.date`-only mode; log once. |
+| `riskregister` inactive | Log "skipped: riskregister inactive"; exit 0 — not an error. |
+| `Finding->add()` returns `false` | Log input + reason; `errors++`; **continue** — one bad Finding never aborts the batch. |
+| PHP fatal mid-loop | `_run` row left `running`; next run marks it `stale`, proceeds. |
+
+### 6.4 Testing
+
+- **Offline** (`php -l` + stubs, `C:\php`): pure functions — `severityForDate()`
+  (5 bands + boundaries), the source-priority resolver, the `code` builder, slug
+  lookup. No DB.
+- **VM** (`tools/selfcheck.php`, `GlpiPlugin\Sac\*::selfChecks()`, hub §4 pattern):
+  seed OS + Computer, LifeCycle past date → assert one `Critical` Finding with the
+  right `code`, a `Finding_Item`, category `Obsolescence`; date → today+120 →
+  assert `Medium` + **no duplicate** (idempotency); blank date + no map → no
+  Finding + one `_reconcile` row; cleared signal → "signal cleared" content line,
+  `status` untouched; teardown.
+
+### 6.5 Cron
+
+- `GlpiPlugin\Sac\Cron::EolScan` — weekly. `CronTask::register(\GlpiPlugin\Sac\Cron::class,
+  'EolScan', WEEK_TIMESTAMP, [...])` → GLPI dispatches `Cron::cronEolScan($task)`.
+- `GlpiPlugin\Sac\Cron::EolCacheRefresh` — weekly, offset a few days before
+  `EolScan`.
+- Both light — no 490 s risk. Manual trigger for testing = Setup → Automatic
+  actions → **Execute** (hub §3: `front/cron.php <taskname>` does not work — it
+  takes a numeric count only).
+
+## 7. Deployment target — VM-HQ-GLPI
+
+Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
+2026-09-03). Facts that constrain SAC (hub §3):
 
 - Host `10.129.2.174` via JumpServer bastion `paman.pgn.co.id:2222`
 - GLPI root `/data/www/glpi`, plugins at `/data/www/glpi/plugins/<name>`
 - nginx + php-fpm **~490 s request timeout** — heavy correlation runs from CLI
-- **No `bin/console` cron** — `sudo -u nginx php /data/www/glpi/front/cron.php <name>`
+- **No `bin/console` cron.** `sudo -u nginx php /data/www/glpi/front/cron.php <N>`
+  — **numeric count only**; a task name casts to 0. Force one task via Setup →
+  Automatic actions → Execute, or let the every-minute system cron pick it up.
 - `bin/console glpi:plugin:install|activate|list` **do** exist
 - No `tmux`/`screen` — `nohup` / `setsid`
 - Shared `/etc/cron.d/glpi` (1-minute tick) drives all plugins' cron tasks
+- **`migration:timestamps` gotcha** — hand-written raw `timestamp` columns can get
+  flagged on this long-upgraded instance. Use GLPI's canonical timestamp form for
+  `date_creation`/`date_mod`. Watch for `Plugin.php:882` "Unable to load plugin
+  information" on first upload = clear OPcache (`systemctl reload php-fpm`).
 - Installed base plugins: `datainjection`, `glpiinventory`, `mreporting`,
-  `reports`, `pdf`, `fields`, `tag`, `telegrambot`
+  `reports`, `pdf`, **`fields` v1.23.2** (GLPI 11 compatible; has the "LifeCycle"
+  container on Operating Systems), `tag`, `telegrambot`
+- **`addressing` plugin** (`glpi_plugin_addressing_addressings`, `begin_ip..end_ip`,
+  `is_deleted`-guarded) is the production-scope source on the VM — **not** core
+  `glpi_ipnetworks`. Named ranges: "Prodcution IT" 10.129.10.1–10.129.11.254,
+  "Production OT" 10.129.18.0–10.129.19.254. SAC module 3 uses this for asset
+  scoping.
 - **No local GLPI runtime** — `C:\php\php.exe` is PHP 8.4 CLI, no mbstring, no
   php.ini. `php -l` + offline stubs only. Runtime verification = a pass on
   VM-HQ-GLPI with the user running commands.
+- **Author/license** (SUITE DIRECTIVE, hub §7): `setup.php` `'author' => 'PGN ICT'`,
+  `'license' => 'GPL-3.0-or-later'`; `composer.json` `"GPL-3.0-or-later"`; repo
+  `LICENSE` = full GPL-3.0 text (done); README/CHANGELOG → `GPL-3.0-or-later`; no
+  file-header retrofit.
 
-## 7. Suite coordination protocol (hub §0)
+## 8. Suite coordination protocol (hub §0)
 
 1. Read `_pgn-glpi-suite.md` at session start.
 2. Before creating any shared-namespace resource (table, right, config
    key/context, menu node, cron task/action, PSR-4 namespace, `$PLUGIN_HOOKS`
    entry) or inter-plugin integration point → check hub §2 for collision, append
-   a dated §7 entry.
+   a dated §7 entry, bump the header "Last updated" line.
 3. Real-time handoff → `SendMessage` to the §6 address; reply to sender.
-4. After editing the hub, bump the header "Last updated" line.
-5. Never raw-write another plugin's tables — use its itemtype API or importer.
+4. Never raw-write another plugin's tables — use its itemtype API or importer.
 
-Peer sessions: `risk-register-dashboard-df` (riskregister),
-`jumpserver-integration-dashboard-32` (integrasipaman).
+Peer sessions (names rotate — re-check with `ListAgents`): `risk-register-dashboard-06`
+(riskregister), `jumpserver-integration-dashboard-46` (integrasipaman),
+`drill-report-glpi-a4` (drillreport). `refreshment-critical-server-eos-*` are
+**not** suite plugins (procurement KAK/ToR; downstream consumer of SAC EOL findings
+at most).
 
-## 8. Open questions
+## 9. Open questions
 
-- ~~**Patch Compliance source**~~ — RESOLVED 2026-09-01: not a separate module;
-  Linux patch = `oscap oval eval` inside module 3; Windows patch deferred (§10).
-- ~~**Menu placement**~~ — RESOLVED 2026-09-01: own node, Management → Security
-  Assessment.
-- ~~**OpenSCAP file collection**~~ — RESOLVED 2026-09-01: Tier 1 (local cron +
-  GLPI Agent Collect summary line) now; Tier 2 (full `results.xml` pull) deferred
-  to §10.
+Resolved: patch-source (→ M3), menu placement (own node), OpenSCAP collection
+(tiered), EOL correlation grain (per-OS), EOL severity thresholds, Finding write
+path (direct API), risk-category names.
 
 Still open:
 
-1. **datainjection on GLPI 11** — one VM check settles whether the CSV path is
-   permanent or an interim measure for both SAC and riskregister.
-2. **Entity model** — single-entity or per-site findings?
-3. **Finding lifecycle** — when a signal clears (software patched, license bought),
-   does SAC close the Finding, or leave that to the risk owner?
-4. **EOL/EOS correlation grain** — per software/version, per OS, per hardware
-   model, or all three? (module 1 brainstorm)
-5. **License Compliance data completeness** — are `glpi_softwarelicenses` seat
+1. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
+   matters (it's already secondary for SAC).
+2. **Entity model** — single-entity or per-site findings? (affects the
+   `(entities_id, code)` upsert loop — currently designed per-entity)
+3. **License Compliance data completeness** — are `glpi_softwarelicenses` seat
    counts actually maintained on this instance, or sparse? (module 2 brainstorm)
+4. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
+   GLPI Inventory Plugin Collect task is usable; Deploy task disabled.
 
-## 9. Next steps
+## 10. Next steps
 
-1. Brainstorming pass on module 1 (EOL/EOS) + module 2 (License Compliance) —
-   nail the correlation logic, the `code` scheme, severity rules, and the SAC
-   table schema.
-2. Write the spec.
-3. Write the plan.
-4. Implement modules 1–2, scaffold plugin structure, `selfcheck.php`.
-5. VM verification pass alongside `riskregister`'s.
+1. ~~Brainstorm module 1 (EOL/EOS)~~ — **done**, §6.
+2. Brainstorm module 2 (License Compliance) — correlation logic, `code` scheme,
+   severity, whether it reuses the generic tables only.
+3. Write the spec (`docs/superpowers/specs/`).
+4. Write the plan.
+5. Implement: plugin scaffold (`setup.php`, `composer.json` PSR-4, `Migration`,
+   `Menu`, `RightDefinition`, `Config`, `selfcheck.php`) → module 1 → module 2.
+6. VM verification pass alongside `riskregister`'s.
 
-## 10. Deferred / future
+## 11. Deferred / future
 
 - **OpenSCAP Tier 2** — full `results.xml`/ARF pull for per-rule CIS-mapped
   Findings. Transport: Kerberos/GSSAPI (FreeIPA, DCI Cibitung first) or SSH.
@@ -196,9 +344,11 @@ Still open:
 - **Windows CIS config compliance** — SSG has no official Windows content; needs
   Microsoft Security Compliance Toolkit / CIS-CAT Lite / PowerShell DSC as a
   separate track.
-- **CVE-to-asset correlation** — no viable GLPI 11 path today (`glpi-cve-plugin`
-  archived 2021, `cve-search`+MongoDB out of scope). Revisit if a maintained
-  option appears.
+- **Hardware-vendor lifecycle source** — for hardware-model EOL beyond native
+  warranty dates.
+- **CVE-to-asset correlation** — no viable GLPI 11 path today. Revisit if a
+  maintained option appears.
+- **EOL evidence export for the server-refresh KAK** — a CSV "these N OSes on M
+  hosts are past EndOfLife as of `<date>`" for `refreshment-critical-server-eos-*`.
 - **integrasipaman → Finding** — high-risk terminal command on a production asset
-  as a candidate Finding (owned by the integrasipaman side; noted so neither
-  designs it away).
+  as a candidate Finding (owned by the integrasipaman side).
