@@ -482,5 +482,11 @@ Still open (VM-verification facts, not design):
   maintained option appears.
 - **EOL evidence export for the server-refresh KAK** — a CSV "these N OSes on M
   hosts are past EndOfLife as of `<date>`" for `refreshment-critical-server-eos-*`.
+  v1 is CSV (`tools/export_findings.php`); **xlsx is a zero-vendor upgrade** —
+  GLPI 11 bundles `phpoffice/phpspreadsheet ^5.1` as a production dep, on the
+  runtime autoloader (`PhpOffice\PhpSpreadsheet\IOFactory`). Also usable for
+  Module 3 config-compliance reports. Pattern:
+  `IOFactory::createReader('Xlsx')->setReadDataOnly(true)->load($path)` →
+  `$sheet->toArray(null,true,false,false)`.
 - **integrasipaman → Finding** — high-risk terminal command on a production asset
   as a candidate Finding (owned by the integrasipaman side).
