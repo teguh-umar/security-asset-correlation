@@ -152,11 +152,14 @@ as updated by `risk-register-dashboard-06` on 2026-09-03):
   external-evidence use case, e.g. the server-refresh KAK). Not the pipeline.
 - **`datainjection` / `FindingInjection` is dormant** — not used unless a
   VM-HQ-GLPI check proves GLPI 11 injection types work.
-- **Risk categories** — riskregister seeds 4 flat `RiskCategory` names in its
-  **v1.1.0** install seed (agreed 2026-09-03, hub §7):
-  `Obsolescence` (M1), `License Compliance` (M2), `Patch Compliance` (M3 patch),
-  `Configuration Compliance` (M3 config). SAC calls `categoryIdByName()` with these
-  exact strings; auto-create is the harmless fallback until the seed commits.
+- **Risk categories** — riskregister **v1.1.0** (shipped 2026-09-03, tag `1.1.0`,
+  merge `7619e40`) seeds 4 flat `RiskCategory` names: `Obsolescence` (M1),
+  `License Compliance` (M2), `Patch Compliance` (M3 patch),
+  `Configuration Compliance` (M3 config). SAC calls
+  `ImportSupport::categoryIdByName()` with these exact strings.
+  **`categoryIdByName()` returns 0 on miss — it does NOT auto-create.** So until
+  v1.1.0 is deployed on VM-HQ-GLPI, SAC Findings get category 0 (uncategorized) —
+  harmless, self-corrects on deploy. SAC must tolerate a 0 return.
 - **CIS mapping:** SCAP `<reference>` CIS sub-control refs (e.g. `5.2`) truncate
   to the parent control number to match `riskregister`'s seeded `cis_v8.csv`
   (top-level controls 1–18 only). Ask `riskregister` to seed sub-controls if finer
@@ -275,6 +278,27 @@ Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
   flagged on this long-upgraded instance. Use GLPI's canonical timestamp form for
   `date_creation`/`date_mod`. Watch for `Plugin.php:882` "Unable to load plugin
   information" on first upload = clear OPcache (`systemctl reload php-fpm`).
+- **`canView(): bool` gotcha** (hub §4, cost riskregister a VM outage) — GLPI
+  11.0.x `CommonGLPI::canView()` declares `: bool`. An override **without** the
+  return type is a fatal compile error that takes down every page including login.
+  SAC's `Menu` class → `public static function canView(): bool`; same for the full
+  can* set (`canCreate`/`canView`/`canUpdate`/`canDelete`/`canPurge`) on any
+  `CommonDBRelation` subclass. Leave other core overrides untyped (`defineTabs`,
+  `rawSearchOptions`, `prepareInputFor*`, `post_*Item`, `cleanDBonPurge`,
+  `getSpecificValueTo*` — no parent return type).
+- **Tab-hook static-ness gotcha** (hub §4, cost riskregister v1.1.2) — match the
+  *immediate parent* class's static-ness for tab hooks, not `CommonGLPI`'s. If SAC
+  adds a rights tab by extending `\Profile`: `getTabNameForItem()` is a **non-static
+  instance** method, `displayTabContentForItem()` stays **static** (asymmetric —
+  `\Profile` keeps the former non-static while making the latter static). `grep`
+  the parent file for `function getTabNameForItem` before writing any override.
+- **Menu `options` sub-entry gotcha** (hub §4, riskregister v1.1.3) — SAC's `Menu`
+  has sub-entries (per-module finding views + Reconcile + Setup). For the
+  breadcrumb "+ Add" button to appear: each front controller passes the sub-menu
+  key as `Html::header()`'s **5th arg** (`Html::header($t,'','management',Menu::class,'<key>')`);
+  `displayFullPageForItem()` sets `$menus['central'] = ['management', Menu::class, '<key>']`;
+  `getMenuContent()` sets `options.<key>.links['add'] = X::getFormURL(false)` gated
+  on `X::canCreate()`.
 - Installed base plugins: `datainjection`, `glpiinventory`, `mreporting`,
   `reports`, `pdf`, **`fields` v1.23.2** (GLPI 11 compatible; has the "LifeCycle"
   container on Operating Systems), `tag`, `telegrambot`
