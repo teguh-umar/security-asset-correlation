@@ -432,17 +432,22 @@ Resolved: patch-source (→ M3), menu (own top-level sector), OpenSCAP collectio
 path (direct API), risk-category names, License data completeness (sparse — M2
 reframed as governance signal, §7).
 
+Resolved 2026-09-07: **Entity model — single entity.** All SAC Findings created in
+one entity via config key `finding_entity` (default `0` = Root Entity; admin sets
+it to where the risk register is maintained, likely `ICT` — there are sub-entities
+under ICT, so putting Findings at `ICT` keeps them visible there). `code` stays
+globally unique. Affected assets from any entity are listed in `content` +
+`Finding_Item`. A human can move an individual Finding via riskregister's Entity
+dropdown / Reconcile if ever needed.
+
 Still open:
 
-1. **Entity model** — single-entity or per-entity findings? GLPI here uses an
-   entity tree (`Root Entity > ICT > …`). Current design creates one Finding per
-   `(signal, entities_id)` in the asset's own entity. Confirm this is wanted vs.
-   collapsing everything to one entity.
-2. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
+1. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
    matters (already secondary for SAC).
-3. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
+2. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
    GLPI Inventory Plugin Collect task is usable; Deploy task disabled; deploy
-   riskregister v1.1.0 so `categoryIdByName` resolves.
+   riskregister v1.1.0 so `categoryIdByName` resolves; which entity `finding_entity`
+   should default to on this instance.
 
 ## 11. Next steps
 
