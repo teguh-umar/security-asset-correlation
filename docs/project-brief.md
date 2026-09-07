@@ -3,8 +3,8 @@
 **Plugin:** Security-Asset Correlation (SAC)
 **Repo:** `teguh-umar/security-asset-correlation` (private)
 **Session:** `sec-assessmant-korelasi-cve-78` `[5c886d]` (was `-cc`)
-**Status:** Design stage — Module 1 design complete, no plugin code yet
-**Last updated:** 2026-09-03
+**Status:** Design stage — Modules 1 & 2 design complete, no plugin code yet
+**Last updated:** 2026-09-07
 
 ---
 
@@ -44,7 +44,7 @@ infrastructure dependency.
 `oscap oval eval` against distro OVAL content — the same `oscap` run and the same
 collection path as CIS config checks. So patch folds into module 3. Windows patch
 compliance (inventoried KBs vs a "latest cumulative update per build" baseline) is
-a thin later track, listed under §11 Deferred.
+a thin later track, listed under §12 Deferred.
 
 ### Out of scope
 
@@ -74,11 +74,19 @@ a thin later track, listed under §11 Deferred.
 - **Namespace (claimed, hub §2):** tables `glpi_plugin_sac_*`, config context
   `plugin:sac`, PSR-4 `GlpiPlugin\Sac\` → `src/`, rights `plugin_sac_*`, cron
   `GlpiPlugin\Sac\Cron::*`.
-- **Menu node (decided 2026-09-01): own node, Management → Security Assessment.**
-  Not a tab under Risk Register — SAC must not depend on `riskregister`'s UI
-  loading; the two integrate through Finding data, not the menu. SAC owns its own
-  rights and its own operational surface (module config, run status, raw signal
-  review, unmatched-asset reconcile, watermarks).
+- **Menu (decided 2026-09-01, form revised 2026-09-07): SAC's own top-level
+  sidebar sector.** Not a tab under Risk Register, and not `Management → …` with
+  sub-entries — riskregister's VM verification found `menu.html.twig` only renders
+  `content` entries that have a `page`, never `options`, so a single node + options
+  shows just "X → X". The working pattern (riskregister v1.2.0):
+  `$PLUGIN_HOOKS['menu_toadd']['sac'] = ['sac' => [Menu::class]]` (array-of-classes
+  = new sector); `Menu::getMenuContent()` → `['is_multi_entries'=>true,
+  'title'=>self::getTypeName()]` + one entry per screen (EOL findings, License
+  findings, Config findings, Reconcile, Setup), each `{title,page,icon,links}`;
+  `return false` when the profile has no `plugin_sac_*` right. Front controllers:
+  `Html::header($t,'','sac','<entry key>')`. SAC still owns its rights and its
+  operational surface; no dependency on riskregister's UI. No §2 namespace impact
+  (config `plugin:sac`, rights `plugin_sac_*`, tables unchanged).
 - **Per-module cron task** pulls its source, correlates to `Computer` (reusing the
   approach in `integrasipaman/inc/correlation.class.php` — parse NAME/IP → GLPI
   native), writes findings.
@@ -109,7 +117,7 @@ rendering to Twig) with minimal rework:
   Yields a compliance % per host and a coarse Finding ("host X config score 72%").
   Requires GLPI Inventory Plugin (installed — verify) and the **Deploy** task must
   stay disabled (RCE vector; Collect is read-only).
-- **Tier 2 (deferred, §11):** pull the full `results.xml`/ARF for per-rule fails
+- **Tier 2 (deferred, §12):** pull the full `results.xml`/ARF for per-rule fails
   mapped to CIS control numbers → granular Findings. Transport: Kerberos/GSSAPI
   where FreeIPA is deployed (DCI Cibitung first), plain SSH elsewhere as interim.
 
@@ -206,7 +214,7 @@ Cron task `GlpiPlugin\Sac\Cron::EolScan`, **weekly**.
      any hostnames that don't resolve (→ riskregister Reconcile)
 5. **Hardware EOL** — native warranty (`warranty_date` + `warranty_duration`) on
    Computer; a per-asset Finding when warranty end is past / near. (Hardware-vendor
-   lifecycle source deferred, §11.)
+   lifecycle source deferred, §12.)
 6. **Signal cleared** (EOL date pushed past 365 days, or OS gone from inventory):
    SAC appends a "signal cleared on `<date>`" line to `content` and stops
    re-asserting. It does **not** auto-close — the risk owner closes.
@@ -260,7 +268,91 @@ generic (`signal_type` + polymorphic `ref_*`) so modules 2–3 reuse them.
   actions → **Execute** (hub §3: `front/cron.php <taskname>` does not work — it
   takes a numeric count only).
 
-## 7. Deployment target — VM-HQ-GLPI
+## 7. Module 2 — License Governance (design complete 2026-09-07)
+
+**Reframed from "License Compliance".** VM check (2026-09-07) confirmed
+`SoftwareLicense` seat data is **not maintained** on this instance — the
+"Number of licenses" column is empty across all 315 software rows; the list is
+also full of sub-components (SQL Server Integration Services, Diagnostics, …) each
+counted as separate software. So Module 2 cannot be a real installs-vs-seats
+engine on day one. It ships as a **governance signal — informational, "further
+action needed"** — and scales into real compliance automatically as license data
+gets entered.
+
+### 7.1 Data flow
+
+Cron task `GlpiPlugin\Sac\Cron::LicenseScan`, **weekly**. Gated on
+`Config::get('license_scan_enabled')`.
+
+1. **Enumerate candidate software** — `glpi_softwares` ⨝ `glpi_manufacturers`,
+   **excluding**: software whose GLPI category is in `license_ignore_categories`
+   (default `["system_component"]` — kills the sub-component noise); software with
+   zero installations.
+2. **Per software gather:** install count (`glpi_items_softwareversions` ⨝
+   `glpi_softwareversions` where `softwares_id=X`, Computers only, not deleted =
+   GLPI "Number of installations"); license records (`glpi_softwarelicenses` where
+   `softwares_id=X` — sum `number`, treat `0`/`-1` as unlimited; `expire` dates);
+   publisher (`manufacturers_id` → name; on the commercial list?).
+3. **Emit Findings:**
+
+   **2a — missing license record** (always on) — one Finding per **(publisher, entity)**:
+   - fires when a commercial-list publisher has ≥1 product with installs and **no**
+     `SoftwareLicense` row
+   - `code` = `SAC-LIC-MISSING-<manufacturers_id>`
+   - `name` = `"Unlicensed commercial software: <publisher>"`
+   - `scope_label` = `"<publisher> — <N> products"`
+   - `content` = product list + install counts + affected hostnames
+   - `Finding_Item` links for affected Computers
+   - `assessment_ref` = `"SAC/license"`, category `License Compliance`
+   - severity: **Low** baseline; **Medium** if distinct unlicensed products >
+     `license_2a_products_threshold` (default 5) **or** total unlicensed installs >
+     `license_2a_installs_threshold` (default 20)
+
+   **2b — license over-deployment** (config toggle
+   `license_check_overdeployment`, **default off** — enable once seat data is
+   real) — one Finding per **(software, entity)**:
+   - fires when a `SoftwareLicense` record exists AND installs > licensed seats
+   - `code` = `SAC-LIC-OVER-<softwares_id>`
+   - `name` = `"License over-deployment: <software>"`
+   - `content` = installed N vs licensed M, overage, affected hosts
+   - severity: installs ≤110 % of seats → **Low**; ≤150 % → **Medium**; >150 % →
+     **High**; **any expired license (`expire` < today) with active installs →
+     High** regardless
+4. **Signal cleared** — same as Module 1: append "cleared on `<date>`" to
+   `content`, don't auto-close.
+
+### 7.2 Config & tables
+
+**Config keys** (context `plugin:sac`):
+
+| Key | Default | Purpose |
+|---|---|---|
+| `license_scan_enabled` | `true` | module master switch |
+| `license_check_overdeployment` | `false` | the 2b toggle |
+| `license_ignore_categories` | `["system_component"]` | categories excluded from 2a |
+| `license_2a_products_threshold` | `5` | > this → 2a Medium |
+| `license_2a_installs_threshold` | `20` | > this → 2a Medium |
+
+**Tables:**
+- `glpi_plugin_sac_commercialpublishers` — `manufacturers_id` (FK
+  `glpi_manufacturers`), `is_active`. Seeded on install (~15: Microsoft, Oracle,
+  VMware, Adobe, Autodesk, Red Hat, IBM, SAP, Citrix, Broadcom/Symantec, Veritas,
+  Micro Focus, Atlassian, JetBrains, Fortinet). Admin-editable via the Setup screen.
+- Reuses generic `_reconcile` (`signal_type='license'` — e.g. a commercial
+  publisher name matching no `glpi_manufacturers` row) and `_run` (`module='license'`).
+- No cache table — all data is native GLPI.
+
+### 7.3 Error handling / testing / cron
+
+- Mirrors Module 1: `Finding->add()` false → log + `errors++` + continue;
+  `riskregister` inactive → skip, exit 0.
+- selfcheck: seed commercial software + installs + no license → assert one 2a
+  Finding per publisher, `Finding_Item` links, category `License Compliance`; add a
+  `SoftwareLicense` with low seats + toggle 2b on → assert one 2b Finding, severity
+  by ratio; teardown.
+- `GlpiPlugin\Sac\Cron::LicenseScan` — weekly.
+
+## 8. Deployment target — VM-HQ-GLPI
 
 Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
 2026-09-03). Facts that constrain SAC (hub §3):
@@ -292,13 +384,15 @@ Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
   instance** method, `displayTabContentForItem()` stays **static** (asymmetric —
   `\Profile` keeps the former non-static while making the latter static). `grep`
   the parent file for `function getTabNameForItem` before writing any override.
-- **Menu `options` sub-entry gotcha** (hub §4, riskregister v1.1.3) — SAC's `Menu`
-  has sub-entries (per-module finding views + Reconcile + Setup). For the
-  breadcrumb "+ Add" button to appear: each front controller passes the sub-menu
-  key as `Html::header()`'s **5th arg** (`Html::header($t,'','management',Menu::class,'<key>')`);
-  `displayFullPageForItem()` sets `$menus['central'] = ['management', Menu::class, '<key>']`;
-  `getMenuContent()` sets `options.<key>.links['add'] = X::getFormURL(false)` gated
-  on `X::canCreate()`.
+- **Menu = own top-level sector** (hub §4, riskregister v1.2.0) — NOT
+  `Management → …` + `options` (`menu.html.twig` only renders `content` entries
+  with a `page`, never `options`; the sidebar would show "X → X"). Pattern:
+  `$PLUGIN_HOOKS['menu_toadd']['sac'] = ['sac' => [Menu::class]]` (array-of-classes
+  = new sector); `Menu::getMenuContent()` → `['is_multi_entries'=>true,
+  'title'=>self::getTypeName()]` + one `{title,page,icon,links}` entry per screen;
+  `return false` with no `plugin_sac_*` right. Front controllers:
+  `Html::header($t,'','sac','<entry key>')`. The "+ Add" breadcrumb resolves from
+  each entry's own `links['add']`.
 - Installed base plugins: `datainjection`, `glpiinventory`, `mreporting`,
   `reports`, `pdf`, **`fields` v1.23.2** (GLPI 11 compatible; has the "LifeCycle"
   container on Operating Systems), `tag`, `telegrambot`
@@ -315,7 +409,7 @@ Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
   `LICENSE` = full GPL-3.0 text (done); README/CHANGELOG → `GPL-3.0-or-later`; no
   file-header retrofit.
 
-## 8. Suite coordination protocol (hub §0)
+## 9. Suite coordination protocol (hub §0)
 
 1. Read `_pgn-glpi-suite.md` at session start.
 2. Before creating any shared-namespace resource (table, right, config
@@ -331,35 +425,39 @@ Peer sessions (names rotate — re-check with `ListAgents`): `risk-register-dash
 **not** suite plugins (procurement KAK/ToR; downstream consumer of SAC EOL findings
 at most).
 
-## 9. Open questions
+## 10. Open questions
 
-Resolved: patch-source (→ M3), menu placement (own node), OpenSCAP collection
+Resolved: patch-source (→ M3), menu (own top-level sector), OpenSCAP collection
 (tiered), EOL correlation grain (per-OS), EOL severity thresholds, Finding write
-path (direct API), risk-category names.
+path (direct API), risk-category names, License data completeness (sparse — M2
+reframed as governance signal, §7).
 
 Still open:
 
-1. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
-   matters (it's already secondary for SAC).
-2. **Entity model** — single-entity or per-site findings? (affects the
-   `(entities_id, code)` upsert loop — currently designed per-entity)
-3. **License Compliance data completeness** — are `glpi_softwarelicenses` seat
-   counts actually maintained on this instance, or sparse? (module 2 brainstorm)
-4. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
-   GLPI Inventory Plugin Collect task is usable; Deploy task disabled.
+1. **Entity model** — single-entity or per-entity findings? GLPI here uses an
+   entity tree (`Root Entity > ICT > …`). Current design creates one Finding per
+   `(signal, entities_id)` in the asset's own entity. Confirm this is wanted vs.
+   collapsing everything to one entity.
+2. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
+   matters (already secondary for SAC).
+3. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
+   GLPI Inventory Plugin Collect task is usable; Deploy task disabled; deploy
+   riskregister v1.1.0 so `categoryIdByName` resolves.
 
-## 10. Next steps
+## 11. Next steps
 
 1. ~~Brainstorm module 1 (EOL/EOS)~~ — **done**, §6.
-2. Brainstorm module 2 (License Compliance) — correlation logic, `code` scheme,
-   severity, whether it reuses the generic tables only.
-3. Write the spec (`docs/superpowers/specs/`).
-4. Write the plan.
-5. Implement: plugin scaffold (`setup.php`, `composer.json` PSR-4, `Migration`,
-   `Menu`, `RightDefinition`, `Config`, `selfcheck.php`) → module 1 → module 2.
-6. VM verification pass alongside `riskregister`'s.
+2. ~~Brainstorm module 2 (License Governance)~~ — **done**, §7.
+3. Resolve the entity-model question (§10.1).
+4. Write the spec (`docs/superpowers/specs/2026-…-sac-modules-1-2-design.md`).
+5. Spec self-review → user review.
+6. Write the implementation plan (writing-plans skill).
+7. Implement: plugin scaffold (`setup.php`, `composer.json` PSR-4, `Migration`,
+   `Menu` sector, `RightDefinition`, `Config`, `selfcheck.php`) → module 1 →
+   module 2.
+8. VM verification pass alongside `riskregister`'s.
 
-## 11. Deferred / future
+## 12. Deferred / future
 
 - **OpenSCAP Tier 2** — full `results.xml`/ARF pull for per-rule CIS-mapped
   Findings. Transport: Kerberos/GSSAPI (FreeIPA, DCI Cibitung first) or SSH.
