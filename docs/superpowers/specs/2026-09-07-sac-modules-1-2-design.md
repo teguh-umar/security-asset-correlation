@@ -82,13 +82,15 @@ Files: `setup.php`, `composer.json`, `hook.php` (install/uninstall), `src/*.php`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `finding_entity` | `0` | Entity all SAC Findings are created in (Root; admin sets to `ICT`) |
+| `finding_entity` | `0` | Entity all SAC Findings are created in (Root Entity) |
+| `finding_recursive` | `true` | create Findings with `is_recursive = 1` so every sub-entity under `finding_entity` sees them (decided 2026-09-07: "Root entity with sub-entities checked") |
 | `eol_scan_enabled` | `true` | Module 1 master switch |
 | `eol_horizon_days` | `365` | max days-to-EOL that still produces a Finding |
 | `eol_severity_high_days` | `90` | ≤ this → High |
 | `eol_severity_medium_days` | `180` | ≤ this → Medium |
-| `eol_hardware_enabled` | `true` | also emit hardware-warranty EOL Findings |
+| `eol_hardware_enabled` | `true` | also emit hardware-warranty EOL Findings (in v1) |
 | `eol_hardware_horizon_days` | `180` | warranty-end horizon |
+| `eol_cache_max_age_days` | `180` | `EolCacheRefresh` only re-fetches an `endoflife.date` product whose `date_fetched` is older than this (configurable 6-monthly / yearly) |
 | `license_scan_enabled` | `true` | Module 2 master switch |
 | `license_check_overdeployment` | `false` | enable Finding type 2b |
 | `license_ignore_categories` | `["system_component"]` | software category system-names excluded from 2a |
@@ -227,7 +229,8 @@ Atlassian, JetBrains, Fortinet.
 
    | field | value |
    |---|---|
-   | `entities_id` | `Config::get('finding_entity')` |
+   | `entities_id` | `Config::get('finding_entity')` (0 = Root) |
+   | `is_recursive` | `Config::get('finding_recursive')` → `1` |
    | `code` | `SAC-EOL-OS-<operatingsystems_id>` |
    | `name` | `"EOL: <os_name>"` (≤255) |
    | `scope_label` | `"<os_name> ×<host count>"` |
@@ -246,13 +249,17 @@ Atlassian, JetBrains, Fortinet.
    `Finding_Item` to that Computer.
 7. Close `RunLog`.
 
-### 4.2 `cronEolCacheRefresh($task)` — weekly, offset
+### 4.2 `cronEolCacheRefresh($task)` — cron cadence weekly, work throttled
 
-For each distinct `(eol_product, eol_cycle)` in `_eolmap`: GET
+Runs weekly (cheap), but only **re-fetches** an `endoflife.date` product whose
+`_eolcache.date_fetched` is older than `Config::get('eol_cache_max_age_days')`
+(default 180 — endoflife.date data changes slowly; admin can set 6-monthly or
+yearly). For each stale distinct `(eol_product, eol_cycle)` in `_eolmap`: GET
 `https://endoflife.date/api/<product>.json`, find the cycle, upsert the `_eolcache`
-row (`eol_date`, `eos_date`, `is_lts`, `raw_json`, `date_fetched`). Also GET
-`api/all.json` occasionally to keep a product-name list for the matcher (§4.4).
-Network failure → log, keep existing cache, `errors++`, do not fail.
+row (`eol_date`, `eos_date`, `is_lts`, `raw_json`, `date_fetched`). A brand-new
+`_eolmap` entry with no cache row is always fetched regardless of the age gate.
+Also GET `api/all.json` when its own cache is stale, for the matcher product list
+(§4.4). Network failure → log, keep existing cache, `errors++`, do not fail.
 
 ### 4.3 Read path: `fields` "LifeCycle"
 
@@ -374,6 +381,9 @@ public function upsert(array $input, array $computerIds, array $unresolved): ?in
 ```
 
 - `code` deterministic, ≤50, unique `(entities_id, code)`.
+- `is_recursive => 1` (from `finding_recursive`) so a Root-entity Finding is
+  visible to every sub-entity. `riskregister`'s `Finding` table has the column
+  (`hook.php`, `is_recursive tinyint DEFAULT 0`).
 - `scope_label` always a real non-empty string.
 - category via `ImportSupport::categoryIdByName($name, $eid)` — **returns 0 on
   miss, no auto-create**; SAC passes `0` through (uncategorised) until
@@ -398,6 +408,13 @@ public function upsert(array $input, array $computerIds, array $unresolved): ?in
 - `link_existing_or_new.html.twig` hidden-field names drift across 11.0.x — if
   SAC's Reconcile "link asset" UI needs it, render a plain explicit `<form>` with
   self-named `itemtype`/`items_id` instead (riskregister v1.2.1).
+- **Form `action` — never `$_SERVER['PHP_SELF']`** (riskregister v1.2.3). In GLPI
+  11 `PHP_SELF`/`REQUEST_URI`/`SCRIPT_NAME`/`PATH_INFO` all point at
+  `public/index.php`, so a `<form action="{PHP_SELF}">` in a front file POSTs to
+  `/` where the inventory endpoint tries to parse the body as agent XML. SAC's
+  Setup + Reconcile forms: `action = Html::getPrefixedUrl('/plugins/sac/front/<x>.php')`
+  or `<Itemtype>::getFormURL()`. `Html::header()`'s 2nd arg (`$url`) is ignored —
+  pass `''`.
 - Migration: canonical `timestamp NULL DEFAULT NULL`; run/expect
   `migration:timestamps` clean.
 - `getDropdown` hook: `function plugin_sac_getDropdown(): array` (old
@@ -467,11 +484,15 @@ OpenSCAP Tier 2, Windows patch baseline, Windows CIS, hardware-vendor lifecycle
 source, CVE correlation, `integrasipaman → Finding`, EOL evidence CSV for the
 server-refresh KAK (the `tools/export_findings.php` output covers this).
 
-## 12. Open items for review
+## 12. Open items — RESOLVED 2026-09-07
 
-- `finding_entity` default — Root vs `ICT` (VM decision).
-- Whether hardware-warranty EOL (§4.6) belongs in Module 1 v1 or is deferred with
-  the other hardware-lifecycle work.
-- Rights granularity — is `plugin_sac_finding` + `plugin_sac_config` enough, or
-  does Reconcile need its own right (`plugin_sac_reconcile`)?
-- `EolCacheRefresh` frequency — weekly vs monthly (endoflife.date changes slowly).
+- **`finding_entity`** → `0` (Root Entity), Findings created **recursive**
+  (`finding_recursive = true` → `is_recursive = 1`) so all sub-entities see them.
+- **Hardware-warranty EOL** → **in Module 1 v1** (§4 step 6).
+- **Rights** → `plugin_sac_finding` + `plugin_sac_config` is enough; Reconcile
+  needs no dedicated right (gated on `plugin_sac_finding` UPDATE).
+- **`EolCacheRefresh`** → cron weekly, actual API re-fetch throttled by
+  `eol_cache_max_age_days` (default 180; admin can set to 365).
+
+No open items remain for this spec. Remaining unknowns are VM-verification facts
+(§10), not design decisions.

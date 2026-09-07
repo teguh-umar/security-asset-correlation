@@ -432,22 +432,27 @@ Resolved: patch-source (→ M3), menu (own top-level sector), OpenSCAP collectio
 path (direct API), risk-category names, License data completeness (sparse — M2
 reframed as governance signal, §7).
 
-Resolved 2026-09-07: **Entity model — single entity.** All SAC Findings created in
-one entity via config key `finding_entity` (default `0` = Root Entity; admin sets
-it to where the risk register is maintained, likely `ICT` — there are sub-entities
-under ICT, so putting Findings at `ICT` keeps them visible there). `code` stays
-globally unique. Affected assets from any entity are listed in `content` +
-`Finding_Item`. A human can move an individual Finding via riskregister's Entity
-dropdown / Reconcile if ever needed.
+Resolved 2026-09-07:
+- **Entity model — single entity.** All SAC Findings created at `finding_entity`
+  (config, default `0` = **Root Entity**) with **`is_recursive = 1`**
+  (`finding_recursive`, default true) so every sub-entity under it sees them
+  ("Root entity with sub-entities checked"). `code` globally unique. Affected
+  assets from any entity listed in `content` + `Finding_Item`.
+- **Hardware-warranty EOL** — included in Module 1 v1.
+- **Rights** — `plugin_sac_finding` + `plugin_sac_config` only; no dedicated
+  reconcile right.
+- **EOL cache refresh** — cron weekly, API re-fetch throttled by
+  `eol_cache_max_age_days` (default 180).
 
-Still open:
+Still open (VM-verification facts, not design):
 
-1. **datainjection on GLPI 11** — one VM check settles whether the CSV path ever
-   matters (already secondary for SAC).
-2. **VM verification** of: the `fields` LifeCycle generated-table name; whether the
-   GLPI Inventory Plugin Collect task is usable; Deploy task disabled; deploy
-   riskregister v1.1.0 so `categoryIdByName` resolves; which entity `finding_entity`
-   should default to on this instance.
+1. **datainjection on GLPI 11** — settles whether the CSV path ever matters
+   (already secondary for SAC).
+2. **VM verification** — `fields` LifeCycle generated-table name; GLPI Inventory
+   Plugin Collect task usable; Deploy task disabled; deploy riskregister v1.1.0 so
+   `categoryIdByName` resolves; egress to `endoflife.date` from the GLPI host.
+
+**Formal spec:** `docs/superpowers/specs/2026-09-07-sac-modules-1-2-design.md`.
 
 ## 11. Next steps
 
