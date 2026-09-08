@@ -1,0 +1,40 @@
+{#
+ # SAC — scan-run history. Read-only; last 50 rows, newest first.
+ # Autoescape ON — no |raw on plugin data.
+ #}
+<div class="card">
+    <div class="card-body">
+    {% if runs is empty %}
+        <div class="text-center text-muted">{{ __('No scans yet', 'sac') }}</div>
+    {% else %}
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>{{ __('Module', 'sac') }}</th>
+                    <th>{{ __('Started', 'sac') }}</th>
+                    <th>{{ __('Ended', 'sac') }}</th>
+                    <th>{{ __('Status', 'sac') }}</th>
+                    <th>{{ __('Counts', 'sac') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in runs %}
+                <tr>
+                    <td>{{ r.module }}</td>
+                    <td>{{ r.date_start }}</td>
+                    <td>{{ r.date_end }}</td>
+                    <td>{{ r.status }}</td>
+                    <td>
+                    {% for k, v in r.counts %}
+                        <span class="badge bg-secondary me-1">{{ k }}: {{ v }}</span>
+                    {% else %}
+                        <span class="text-muted">&mdash;</span>
+                    {% endfor %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    </div>
+</div>
