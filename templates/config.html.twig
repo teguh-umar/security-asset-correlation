@@ -1,0 +1,48 @@
+{#
+ # SAC — configuration screen.
+ # Autoescape is ON. Never use |raw on plugin data.
+ # Task 11 refines grouping/labels; this renders a working key/value form.
+ #}
+<div class="card">
+    <div class="card-body">
+        <h3 class="card-title">{{ __('Security Assessment setup', 'sac') }}</h3>
+
+        <form method="post" action="{{ action }}">
+            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>{{ __('Setting', 'sac') }}</th>
+                        <th>{{ __('Value', 'sac') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for key, default in defaults %}
+                    {% set current = values[key] is defined ? values[key] : default %}
+                    <tr>
+                        <td><label for="sac_{{ key }}">{{ key }}</label></td>
+                        <td>
+                        {% if default in [0, 1, '0', '1'] %}
+                            <input type="hidden" name="{{ key }}" value="0">
+                            <input type="checkbox" id="sac_{{ key }}" name="{{ key }}" value="1"
+                                   {{ current in [1, '1'] ? 'checked' : '' }}>
+                        {% elseif default matches '/^-?\\d+$/' %}
+                            <input type="number" id="sac_{{ key }}" name="{{ key }}"
+                                   class="form-control" value="{{ current }}">
+                        {% else %}
+                            <input type="text" id="sac_{{ key }}" name="{{ key }}"
+                                   class="form-control" value="{{ current }}">
+                        {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <button type="submit" name="update" value="1" class="btn btn-primary">
+                {{ __('Save', 'sac') }}
+            </button>
+        </form>
+    </div>
+</div>

@@ -45,5 +45,4 @@ function plugin_init_sac(): void
     Plugin::registerClass(SacProfile::class, ['addtabon' => ['Profile']]);
 
     // Cron tasks are registered in plugin_sac_install(); nothing needed here.
-    $PLUGIN_HOOKS['csrf_compliant']['sac'] = true;
 }

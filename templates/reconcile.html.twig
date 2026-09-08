@@ -1,0 +1,31 @@
+{#
+ # SAC — reconcile / scan-runs table. Empty state for now; Task 11 fills the rows.
+ # Shared by front/reconcile.php and front/run.php (both pass { rows: [] }).
+ # Autoescape ON — no |raw on plugin data.
+ #}
+<div class="card">
+    <div class="card-body">
+    {% if rows is empty %}
+        <div class="text-center text-muted">{{ __('Nothing to reconcile', 'sac') }}</div>
+    {% else %}
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                {% for header in rows|first|keys %}
+                    <th>{{ header }}</th>
+                {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                {% for cell in row %}
+                    <td>{{ cell }}</td>
+                {% endfor %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    </div>
+</div>
