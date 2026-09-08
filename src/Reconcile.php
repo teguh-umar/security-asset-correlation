@@ -91,7 +91,112 @@ class Reconcile extends \CommonDBTM
         }
     }
 
-    // listForDisplay(), resolve(), resolveEolMapping() — Task 11.
+    /**
+     * Open (or, with $includeResolved, all) reconcile rows, newest activity
+     * first, each enriched with a human `label`: the referenced item's display
+     * name when ref_id > 0, otherwise the free-text `detail`.
+     *
+     * @return array<int,array{
+     *     id:int, signal_type:string, ref_itemtype:string, ref_id:int,
+     *     reason:string, detail:string, label:string,
+     *     date_firstseen:?string, date_lastseen:?string
+     * }>
+     */
+    public static function listForDisplay(bool $includeResolved = false): array
+    {
+        global $DB;
+
+        $where = $includeResolved ? [] : ['is_resolved' => 0];
+
+        $out = [];
+        foreach ($DB->request([
+            'FROM'  => self::TABLE,
+            'WHERE' => $where,
+            'ORDER' => ['is_resolved ASC', 'date_lastseen DESC', 'id DESC'],
+        ]) as $row) {
+            $refId    = (int) $row['ref_id'];
+            $itemtype = (string) $row['ref_itemtype'];
+            $detail   = (string) ($row['detail'] ?? '');
+            $label    = $detail;
+
+            if ($refId > 0 && $itemtype !== '') {
+                $named = self::refLabel($itemtype, $refId);
+                if ($named !== '') {
+                    $label = $named;
+                }
+            }
+
+            $out[] = [
+                'id'             => (int) $row['id'],
+                'signal_type'    => (string) $row['signal_type'],
+                'ref_itemtype'   => $itemtype,
+                'ref_id'         => $refId,
+                'reason'         => (string) $row['reason'],
+                'detail'         => $detail,
+                'label'          => $label,
+                'date_firstseen' => $row['date_firstseen'],
+                'date_lastseen'  => $row['date_lastseen'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Display name for a referenced GLPI row. Derives the table as
+     * `glpi_<lower(itemtype)>s` for Dropdown::getDropdownName(); falls back to
+     * getItemForItemtype()+getFromDB(), then '' when nothing resolves.
+     */
+    private static function refLabel(string $itemtype, int $refId): string
+    {
+        if (class_exists(\Dropdown::class)) {
+            $name = (string) \Dropdown::getDropdownName('glpi_' . strtolower($itemtype) . 's', $refId);
+            $name = trim(str_replace('&nbsp;', '', $name));
+            if ($name !== '' && $name !== '-') {
+                return $name;
+            }
+        }
+
+        if (function_exists('getItemForItemtype')) {
+            $obj = \getItemForItemtype($itemtype);
+            if ($obj instanceof \CommonDBTM && $obj->getFromDB($refId)) {
+                return (string) ($obj->fields['name'] ?? '');
+            }
+        }
+
+        return '';
+    }
+
+    /** Mark one reconcile row resolved (idempotent). */
+    public static function resolve(int $id): void
+    {
+        global $DB;
+        $DB->update(self::TABLE, ['is_resolved' => 1], ['id' => (int) $id]);
+    }
+
+    /**
+     * Resolve an EOL "no_mapping" signal: write a human-confirmed
+     * OperatingSystem→endoflife.date mapping for the row's ref_id, then resolve.
+     */
+    public static function resolveEolMapping(int $id, string $product, string $cycle): void
+    {
+        global $DB;
+
+        $row  = $DB->request([
+            'SELECT' => ['ref_id'],
+            'FROM'   => self::TABLE,
+            'WHERE'  => ['id' => (int) $id],
+        ])->current();
+        $osId = (int) (is_array($row) ? ($row['ref_id'] ?? 0) : 0);
+
+        \GlpiPlugin\Sac\Eol\EolMap::putConfirmed(
+            $osId,
+            $product,
+            $cycle,
+            (int) ($_SESSION['glpiID'] ?? 0)
+        );
+        self::resolve((int) $id);
+    }
 
     /** @return array<string,callable():void> VM-only checks — they touch $DB. */
     public static function selfChecks(): array
@@ -125,6 +230,40 @@ class Reconcile extends \CommonDBTM
                 sac_assert_eq($row2['detail'], 'second', 'detail refreshed on re-note');
 
                 $DB->delete(self::TABLE, $key);
+            },
+
+            'db/reconcile-resolve' => static function (): void {
+                global $DB;
+                $sig = '__sac_selftest_resolve__';
+                $key = [
+                    'signal_type'  => $sig,
+                    'ref_itemtype' => 'Computer',
+                    'ref_id'       => 2147480998,
+                    'reason'       => 'selftest',
+                ];
+
+                try {
+                    self::note($sig, 'Computer', 2147480998, 'selftest', 'resolve-me');
+
+                    $rid = (int) $DB->request(['FROM' => self::TABLE, 'WHERE' => $key])->current()['id'];
+                    sac_assert($rid > 0, 'note() row present');
+
+                    $openIds = array_column(self::listForDisplay(), 'id');
+                    sac_assert(in_array($rid, $openIds, true), 'unresolved row listed by listForDisplay()');
+
+                    self::resolve($rid);
+
+                    $openIds = array_column(self::listForDisplay(), 'id');
+                    sac_assert(!in_array($rid, $openIds, true), 'resolved row dropped from listForDisplay()');
+
+                    $allIds = array_column(self::listForDisplay(true), 'id');
+                    sac_assert(in_array($rid, $allIds, true), 'resolved row still in listForDisplay(true)');
+
+                    $row = $DB->request(['FROM' => self::TABLE, 'WHERE' => $key])->current();
+                    sac_assert_eq((int) $row['is_resolved'], 1, 'is_resolved flipped to 1');
+                } finally {
+                    $DB->delete(self::TABLE, $key);
+                }
             },
         ];
     }
