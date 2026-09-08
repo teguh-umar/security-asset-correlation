@@ -291,10 +291,24 @@ final class EolScan
         }
     }
 
-    /** Tear every seeded row for a selfCheck back down. Safe to call twice. */
-    private static function scTeardown(array $osIds, array $cids, array $codes): void
+    /** Highest `glpi_plugin_sac_run.id` right now — the floor for selfCheck cleanup. */
+    private static function scRunFloor(): int
     {
         global $DB;
+        $row = $DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current();
+        return (int) (is_array($row) ? ($row['m'] ?? 0) : 0);
+    }
+
+    /**
+     * Tear every seeded row for a selfCheck back down. Safe to call twice.
+     * Also deletes any `glpi_plugin_sac_run` rows this check's RunLog::begin('eol')
+     * calls created (id > $sinceRunId) so selfCheck runs never pollute audit history.
+     */
+    private static function scTeardown(array $osIds, array $cids, array $codes, int $sinceRunId = 0): void
+    {
+        global $DB;
+
+        $DB->delete('glpi_plugin_sac_run', ['module' => 'eol', 'id' => ['>', $sinceRunId]]);
 
         if (FindingWriter::isAvailable()) {
             $f  = new \GlpiPlugin\Riskregister\Finding();
@@ -333,6 +347,7 @@ final class EolScan
                 if (!FindingWriter::isAvailable()) { return; }
                 $osId = 2147481001; $cid = 2147481002;
                 $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
@@ -352,7 +367,7 @@ final class EolScan
                     ]);
                     sac_assert_eq(count($links), 1, 'EOL-1: one Finding_Item to the seeded Computer');
                 } finally {
-                    self::scTeardown([$osId], [$cid], [$code]);
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
                 }
             },
 
@@ -361,6 +376,7 @@ final class EolScan
                 if (!FindingWriter::isAvailable()) { return; }
                 $osId = 2147481003; $cid = 2147481004;
                 $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
@@ -376,7 +392,7 @@ final class EolScan
                     sac_assert_eq(count($rows), 1, 'EOL-2: still exactly one Finding row');
                     sac_assert_eq($rows[array_key_first($rows)]['severity'], 'Medium', 'EOL-2: severity re-graded to Medium');
                 } finally {
-                    self::scTeardown([$osId], [$cid], [$code]);
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
                 }
             },
 
@@ -386,6 +402,7 @@ final class EolScan
                 global $DB;
                 $osId = 2147481005; $cid = 2147481006;
                 $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($osId, $cid, null); // no mapping
                     self::run(RunLog::begin('eol'));
@@ -404,7 +421,7 @@ final class EolScan
                     ])->current();
                     sac_assert($rc !== null, 'EOL-3: a no_mapping reconcile row was written');
                 } finally {
-                    self::scTeardown([$osId], [$cid], [$code]);
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
                 }
             },
 
@@ -414,6 +431,7 @@ final class EolScan
                 global $DB;
                 $osId = 2147481007; $cid = 2147481008;
                 $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
@@ -441,7 +459,7 @@ final class EolScan
                     $counts  = json_decode((string) $runRow['counts_json'], true);
                     sac_assert((int) ($counts['findings_cleared'] ?? 0) >= 1, 'EOL-4: findings_cleared counted');
                 } finally {
-                    self::scTeardown([$osId], [$cid], [$code]);
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
                 }
             },
 
@@ -450,6 +468,7 @@ final class EolScan
                 if (!FindingWriter::isAvailable()) { return; }
                 $osId = 2147481009; $cid = 2147481010;
                 $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
@@ -460,7 +479,7 @@ final class EolScan
                     $row = $rows[array_key_first($rows)];
                     sac_assert(str_contains((string) $row['content'], 'source: endoflife.date'), 'EOL-5: content names the endoflife.date source');
                 } finally {
-                    self::scTeardown([$osId], [$cid], [$code]);
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
                 }
             },
         ];

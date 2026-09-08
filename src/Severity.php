@@ -30,6 +30,11 @@ final class Severity
         if ($expired) {
             return 'High';
         }
+        if ($seats <= 0) {
+            // Unlimited/unknown seat count should never reach here (LicenseScan
+            // excludes number<=0 from 2b), but guard the division regardless.
+            return 'High';
+        }
         $ratio = $installs / $seats;
         if ($ratio > 1.5) {
             return 'High';
@@ -64,6 +69,9 @@ final class Severity
                 sac_assert_eq(self::forLicenseOverage(15, 10, false), 'Medium', '150%');
                 sac_assert_eq(self::forLicenseOverage(16, 10, false), 'High', '160%');
                 sac_assert_eq(self::forLicenseOverage(11, 10, true), 'High', 'expired beats ratio');
+            },
+            'severity/license-zero-seats' => static function (): void {
+                sac_assert_eq(self::forLicenseOverage(5, 0, false), 'High', 'zero seats');
             },
         ];
     }

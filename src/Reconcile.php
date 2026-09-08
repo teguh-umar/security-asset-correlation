@@ -189,6 +189,12 @@ class Reconcile extends \CommonDBTM
         ])->current();
         $osId = (int) (is_array($row) ? ($row['ref_id'] ?? 0) : 0);
 
+        // Stale / already-deleted reconcile row → don't write a junk
+        // operatingsystems_id=0 mapping.
+        if ($osId === 0) {
+            return;
+        }
+
         \GlpiPlugin\Sac\Eol\EolMap::putConfirmed(
             $osId,
             $product,

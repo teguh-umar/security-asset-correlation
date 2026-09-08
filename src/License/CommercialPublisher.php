@@ -62,11 +62,14 @@ class CommercialPublisher extends \CommonDBTM
                 continue;
             }
 
+            // Case-insensitive EQUALITY (GLPI's default collation is CI). A plain
+            // ['name' => ['LIKE', $name]] would treat %/_ in a publisher name as
+            // wildcards — e.g. "AT&T" is fine but "Something_Co" would over-match.
             $matches = [];
             foreach ($DB->request([
                 'SELECT' => ['id'],
                 'FROM'   => 'glpi_manufacturers',
-                'WHERE'  => ['name' => ['LIKE', $name]],
+                'WHERE'  => ['name' => $name],
             ]) as $m) {
                 $matches[] = (int) $m['id'];
             }

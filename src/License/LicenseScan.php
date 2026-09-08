@@ -95,8 +95,10 @@ final class LicenseScan
                         'status'       => 'Open',
                     ];
                     FindingWriter::upsert($input, array_map('intval', array_keys($assets['resolved'])), '', $run);
-                } else {
-                    // Was over-deployed and no longer is, or the check is off.
+                } elseif ($checkOver) {
+                    // 2b is enabled and this software was over-deployed before but
+                    // is not now — clear the prior Finding. When 2b is off we never
+                    // asserted a SAC-LIC-OVER Finding, so there is nothing to clear.
                     FindingWriter::appendClearedNote(Code::licOver($sid), $entity, 'no longer over-deployed', $run);
                 }
             }
@@ -319,9 +321,19 @@ final class LicenseScan
         ]);
     }
 
-    private static function scTeardown(array $ids, array $codes): void
+    /** Highest `glpi_plugin_sac_run.id` right now — the floor for selfCheck cleanup. */
+    private static function scRunFloor(): int
     {
         global $DB;
+        $row = $DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current();
+        return (int) (is_array($row) ? ($row['m'] ?? 0) : 0);
+    }
+
+    private static function scTeardown(array $ids, array $codes, int $sinceRunId = 0): void
+    {
+        global $DB;
+
+        $DB->delete('glpi_plugin_sac_run', ['module' => 'license', 'id' => ['>', $sinceRunId]]);
 
         if (FindingWriter::isAvailable()) {
             $f  = new \GlpiPlugin\Riskregister\Finding();
@@ -366,6 +378,7 @@ final class LicenseScan
                 if (!FindingWriter::isAvailable()) { return; }
                 $ids   = ['mid' => 2147482001, 'sid' => 2147482002, 'svid' => 2147482003, 'cid' => 2147482004];
                 $code  = Code::licMissing($ids['mid']);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($ids, true);
                     $run = RunLog::begin('license');
@@ -387,7 +400,7 @@ final class LicenseScan
                     ]);
                     sac_assert_eq(count($links), 1, 'LIC-1: one Finding_Item to the seeded Computer');
                 } finally {
-                    self::scTeardown($ids, [$code]);
+                    self::scTeardown($ids, [$code], $startId);
                 }
             },
 
@@ -402,6 +415,7 @@ final class LicenseScan
                 ];
                 $missCode = Code::licMissing($ids['mid']);
                 $overCode = Code::licOver($ids['sid']);
+                $startId = self::scRunFloor();
                 try {
                     self::scSeed($ids, true);
                     self::scConfig('license_check_overdeployment', 0);
@@ -448,7 +462,7 @@ final class LicenseScan
                     );
                 } finally {
                     self::scConfig('license_check_overdeployment', 0);
-                    self::scTeardown($ids, [$missCode, $overCode]);
+                    self::scTeardown($ids, [$missCode, $overCode], $startId);
                 }
             },
 
@@ -461,6 +475,7 @@ final class LicenseScan
                     'cid' => 2147482024, 'catid' => 2147482025,
                 ];
                 $code = Code::licMissing($ids['mid']);
+                $startId = self::scRunFloor();
                 try {
                     $DB->insert('glpi_softwarecategories', ['id' => $ids['catid'], 'name' => 'system_component']);
                     self::scSeed($ids, true, $ids['catid']);
@@ -472,7 +487,7 @@ final class LicenseScan
                     $f = new \GlpiPlugin\Riskregister\Finding();
                     sac_assert_eq(count($f->find(['code' => $code])), 0, 'LIC-3: ignored-category software produces no Finding');
                 } finally {
-                    self::scTeardown($ids, [$code]);
+                    self::scTeardown($ids, [$code], $startId);
                 }
             },
         ];

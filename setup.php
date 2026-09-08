@@ -1,6 +1,5 @@
 <?php
 
-use GlpiPlugin\Sac\Cron;
 use GlpiPlugin\Sac\Menu;
 use GlpiPlugin\Sac\Profile as SacProfile;
 
