@@ -5,9 +5,7 @@ GLPI 11 plugin. Correlates **non-CVE security signals** to GLPI assets and emits
 plugin, which owns the risk model (Finding → Risk, 5×5 scoring, ISO 27001 / CIS v8
 mapping).
 
-> **Status: brainstorm stage.** No spec, plan, or plugin code yet. This repo
-> currently holds the design transcript only. Build order: brainstorming → spec →
-> plan → implementation, starting from the EOL/EOS and License Compliance modules.
+> **Status: Modules 1 & 2 in development.** Building EOL/EOS and License Compliance modules.
 
 ## Scope
 
@@ -19,6 +17,17 @@ mapping).
 | Config Compliance | OpenSCAP + SCAP Security Guide (CIS-aligned) | benchmark score < threshold |
 
 SAC **stops at emitting `Finding` rows**. It does not build its own risk model.
+
+## Install
+
+```bash
+# Copy plugin to GLPI plugins directory
+cp -r . /data/www/glpi/plugins/sac
+
+# Install and activate
+bin/console glpi:plugin:install sac --username=<admin>
+glpi:plugin:activate sac
+```
 
 ## Suite coordination
 

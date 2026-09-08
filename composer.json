@@ -1,0 +1,8 @@
+{
+  "name": "pgn/sac",
+  "description": "Security-Asset Correlation for GLPI 11 — EOL/EOS, license governance, config compliance",
+  "type": "glpi-plugin",
+  "license": "GPL-3.0-or-later",
+  "require": { "php": ">=8.2" },
+  "autoload": { "psr-4": { "GlpiPlugin\\Sac\\": "src/" } }
+}
