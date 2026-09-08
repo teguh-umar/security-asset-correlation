@@ -167,12 +167,12 @@ final class FindingWriter
                 $cid  = (int) $comp->add(['name' => '__sac_sc_comp__', 'entities_id' => $ent]);
                 sac_assert($cid > 0, 'seed computer created');
 
+                $f = new \GlpiPlugin\Riskregister\Finding();
                 try {
                     $id1 = self::upsert($input, [$cid], 'raw asset text', $run);
                     $id2 = self::upsert($input, [$cid], 'raw asset text', $run);
                     sac_assert($id1 !== null && $id1 === $id2, 'same finding id on re-run');
 
-                    $f    = new \GlpiPlugin\Riskregister\Finding();
                     $rows = $f->find(['entities_id' => $ent, 'code' => $code]);
                     sac_assert_eq(count($rows), 1, 'exactly one Finding row');
 
@@ -183,12 +183,12 @@ final class FindingWriter
                         'items_id'                        => $cid,
                     ]);
                     sac_assert_eq(count($links), 1, 'exactly one Finding_Item link');
-
-                    // teardown: delete the Finding by code
-                    foreach (array_keys($rows) as $fid) {
+                } finally {
+                    // teardown must run even on an assert failure above, or the
+                    // fixed-code Finding __SAC_SC_UPSERT__ leaks into real data.
+                    foreach (array_keys($f->find(['entities_id' => $ent, 'code' => $code])) as $fid) {
                         $f->delete(['id' => (int) $fid], true);
                     }
-                } finally {
                     (new \Computer())->delete(['id' => $cid], true);
                 }
             },

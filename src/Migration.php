@@ -28,14 +28,12 @@ final class Migration
             $DB->doQuery('DROP TABLE IF EXISTS `' . $row['TABLE_NAME'] . '`');
         }
         \Config::deleteConfigurationValues(Config::CONTEXT, array_keys(Config::DEFAULTS));
-        foreach (['EolScan', 'EolCacheRefresh', 'LicenseScan'] as $t) {
-            \CronTask::unregister('sac');
-        }
+        \CronTask::unregister('sac');
     }
 
     private static function define(): void
     {
-        $charset = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+        $table_options = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
         self::$tables['glpi_plugin_sac_eolmap'] = "
             CREATE TABLE `glpi_plugin_sac_eolmap` (
@@ -50,7 +48,7 @@ final class Migration
               `date_mod` timestamp NULL DEFAULT NULL,
               PRIMARY KEY (`id`),
               UNIQUE KEY `os` (`operatingsystems_id`)
-            ) $charset";
+            ) $table_options";
 
         self::$tables['glpi_plugin_sac_eolcache'] = "
             CREATE TABLE `glpi_plugin_sac_eolcache` (
@@ -64,7 +62,7 @@ final class Migration
               `date_fetched` timestamp NULL DEFAULT NULL,
               PRIMARY KEY (`id`),
               UNIQUE KEY `product_cycle` (`eol_product`,`eol_cycle`)
-            ) $charset";
+            ) $table_options";
 
         self::$tables['glpi_plugin_sac_commercialpublishers'] = "
             CREATE TABLE `glpi_plugin_sac_commercialpublishers` (
@@ -75,7 +73,7 @@ final class Migration
               `date_mod` timestamp NULL DEFAULT NULL,
               PRIMARY KEY (`id`),
               UNIQUE KEY `manufacturer` (`manufacturers_id`)
-            ) $charset";
+            ) $table_options";
 
         self::$tables['glpi_plugin_sac_reconcile'] = "
             CREATE TABLE `glpi_plugin_sac_reconcile` (
@@ -90,7 +88,7 @@ final class Migration
               `is_resolved` tinyint(1) NOT NULL DEFAULT 0,
               PRIMARY KEY (`id`),
               UNIQUE KEY `signal` (`signal_type`,`ref_itemtype`,`ref_id`,`reason`)
-            ) $charset";
+            ) $table_options";
 
         self::$tables['glpi_plugin_sac_run'] = "
             CREATE TABLE `glpi_plugin_sac_run` (
@@ -103,6 +101,6 @@ final class Migration
               `message` text,
               PRIMARY KEY (`id`),
               KEY `module_start` (`module`,`date_start`)
-            ) $charset";
+            ) $table_options";
     }
 }

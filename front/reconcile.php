@@ -8,10 +8,16 @@ Session::checkRight('plugin_sac_finding', READ);
 
 if (isset($_POST['map'])) {
     Session::checkRight('plugin_sac_finding', UPDATE);
+    $product = trim((string) ($_POST['product'] ?? ''));
+    $cycle   = trim((string) ($_POST['cycle'] ?? ''));
+    if ($product === '' || $cycle === '') {
+        Session::addMessageAfterRedirect(__('Product and cycle are required', 'sac'), false, ERROR);
+        Html::back();
+    }
     Reconcile::resolveEolMapping(
         (int) $_POST['map'],
-        (string) ($_POST['product'] ?? ''),
-        (string) ($_POST['cycle'] ?? '')
+        $product,
+        $cycle
     );
     Session::addMessageAfterRedirect(__('EOL mapping saved; signal resolved', 'sac'));
     Html::back();
