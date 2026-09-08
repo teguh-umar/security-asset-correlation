@@ -85,6 +85,15 @@ final class EolScan
             $assets    = AssetResolver::computersForOs($osId);
             $hostCount = count($assets['resolved']);
 
+            // The OS still has an inventory row, but every Computer carrying it is
+            // trashed / a template. Treat as "no longer in live inventory" (spec
+            // §4.5) — clear any prior Finding and stop re-asserting.
+            if ($hostCount === 0) {
+                FindingWriter::appendClearedNote(Code::eolOs($osId), $entity, 'OS not in live inventory', $run);
+                $run->bump('scanned');
+                continue;
+            }
+
             if ($sev === null) {
                 FindingWriter::appendClearedNote(
                     Code::eolOs($osId),
@@ -178,15 +187,24 @@ final class EolScan
                 'warranty_date' => ['<>', ''],
             ],
         ]) as $c) {
-            $cid            = (int) $c['id'];
-            $cname          = (string) ($c['name'] ?? '');
-            $warrantyDate   = (string) $c['warranty_date'];
-            $endDate        = date('Y-m-d', strtotime($warrantyDate . ' +' . (int) $c['warranty_duration'] . ' months'));
-            $days           = (int) floor((strtotime($endDate) - strtotime('today')) / 86400);
-            $sev            = Severity::forEolDays($days, (int) Config::get('eol_hardware_horizon_days'), 90, 180);
+            $cid          = (int) $c['id'];
+            $cname        = (string) ($c['name'] ?? '');
+            $warrantyDate = (string) $c['warranty_date'];
+
+            // Zero / unparseable warranty date — skip (strtotime() would fall to
+            // the 1970 epoch and manufacture a spurious Critical).
+            $endTs = strtotime($warrantyDate . ' +' . (int) $c['warranty_duration'] . ' months');
+            if ($endTs === false || str_starts_with($warrantyDate, '0000')) {
+                continue;
+            }
+
+            $endDate = date('Y-m-d', $endTs);
+            $days    = (int) floor((strtotime($endDate) - strtotime('today')) / 86400);
+            $sev     = Severity::forEolDays($days, (int) Config::get('eol_hardware_horizon_days'), 90, 180);
 
             if ($sev === null) {
                 FindingWriter::appendClearedNote(Code::eolHw($cid), $entity, 'warranty end beyond horizon', $run);
+                $run->bump('scanned');
                 continue;
             }
 
