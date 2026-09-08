@@ -18,6 +18,7 @@ final class Migration
         }
         Config::setDefaults();
         Cron::register();
+        License\CommercialPublisher::seedFromCsv();
     }
 
     public static function uninstall(): void
