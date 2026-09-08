@@ -15,7 +15,7 @@ function sac_assert_eq(mixed $got, mixed $want, string $msg = ''): void
 }
 
 $root  = dirname(__DIR__);
-$pure  = ['Severity', 'Code', 'EolMatch', 'FindingWriter', 'Config']; // classes with a pure selfChecks() subset
+$pure  = ['Severity', 'Code', 'EolMatch', 'FindingWriter', 'Config', 'Http']; // classes with a pure selfChecks() subset
 $filter = $argv[1] ?? '';
 $fail = 0; $total = 0;
 
