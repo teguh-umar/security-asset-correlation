@@ -26,6 +26,7 @@ foreach ($pure as $short) {
     $class = "GlpiPlugin\\Sac\\$short";
     if (!method_exists($class, 'selfChecks')) { continue; }
     foreach ($class::selfChecks() as $name => $check) {
+        if (str_starts_with($name, 'db/')) { continue; } // VM-only — needs $DB / GLPI
         if ($filter !== '' && !str_contains($name, $filter)) { continue; }
         $total++;
         try { $check(); echo "PASS  $name\n"; }
