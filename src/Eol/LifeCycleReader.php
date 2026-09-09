@@ -27,8 +27,13 @@ final class LifeCycleReader
     /** Exact table name the `fields` plugin would generate for OS + "LifeCycle". */
     private const EXACT_TABLE = 'glpi_plugin_fields_operatingsystemlifecycles';
 
-    /** LIKE fallback when the container was named differently. */
-    private const TABLE_LIKE = 'glpi_plugin_fields_%lifecycle%';
+    /**
+     * LIKE fallback when the container was named differently. Constrained to
+     * contain `operatingsystem` so it can never latch onto a Computer-attached
+     * `fields` container (the `fields` plugin always prefixes the generated
+     * table with the lower-cased itemtype) (I10).
+     */
+    private const TABLE_LIKE = 'glpi_plugin_fields_operatingsystem%lifecycle%';
 
     public static function available(): bool
     {
@@ -92,10 +97,24 @@ final class LifeCycleReader
             return null;
         }
 
+        // The `fields` plugin keys dropdown containers by `items_id`. If that
+        // column is absent this is not the layout we can read (I10).
+        if (!$DB->fieldExists($table, 'items_id')) {
+            return null;
+        }
+
+        $where = ['items_id' => $operatingsystemsId];
+        // When the container also carries an `itemtype` discriminator, pin it to
+        // OperatingSystem so a Computer row with the same items_id can never be
+        // read as this OS's EOL date (I10).
+        if ($DB->fieldExists($table, 'itemtype')) {
+            $where['itemtype'] = 'OperatingSystem';
+        }
+
         $row = $DB->request([
             'SELECT' => [$col],
             'FROM'   => $table,
-            'WHERE'  => ['items_id' => $operatingsystemsId],
+            'WHERE'  => $where,
         ])->current();
 
         if (!$row || !array_key_exists($col, (array) $row)) {
@@ -161,6 +180,16 @@ final class LifeCycleReader
             self::$dateCol = $candidates[0];
         }
         return self::$dateCol;
+    }
+
+    /**
+     * Resolved EOL date column name, or '' when none could be resolved.
+     * Public so the VM selfChecks can seed a real `fields` LifeCycle row into
+     * the correct column (I11). Not used by production code.
+     */
+    public static function dateColumnName(): string
+    {
+        return self::dateColumn();
     }
 
     /**

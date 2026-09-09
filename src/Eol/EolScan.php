@@ -36,6 +36,13 @@ final class EolScan
         $entity    = (int) Config::get('finding_entity');
         $recursive = (int) Config::get('finding_recursive');
 
+        // Hoist per-run-stable lookups out of the OS loop (I7): the severity
+        // thresholds and the Obsolescence category id do not change within a run.
+        $horizonDays = (int) Config::get('eol_horizon_days');
+        $highDays    = (int) Config::get('eol_severity_high_days');
+        $mediumDays  = (int) Config::get('eol_severity_medium_days');
+        $obsolescenceCatId = FindingWriter::categoryId('Obsolescence', $entity);
+
         /** @var array<int,string> composite reconcile keys seen this run */
         $seen = [];
 
@@ -75,12 +82,7 @@ final class EolScan
             }
 
             $days = (int) floor((strtotime($date) - strtotime('today')) / 86400);
-            $sev  = Severity::forEolDays(
-                $days,
-                (int) Config::get('eol_horizon_days'),
-                (int) Config::get('eol_severity_high_days'),
-                (int) Config::get('eol_severity_medium_days')
-            );
+            $sev  = Severity::forEolDays($days, $horizonDays, $highDays, $mediumDays);
 
             $assets    = AssetResolver::computersForOs($osId);
             $hostCount = count($assets['resolved']);
@@ -115,7 +117,7 @@ final class EolScan
                 'content'      => "OS: $osName\nEnd of life: $date (source: $source)\nAffected hosts:\n"
                     . implode("\n", array_map(fn ($n) => "- $n", $assets['resolved'])),
                 'assessment_ref' => 'SAC/eol',
-                'plugin_riskregister_riskcategories_id' => FindingWriter::categoryId('Obsolescence', $entity),
+                'plugin_riskregister_riskcategories_id' => $obsolescenceCatId,
                 'status'       => 'Open',
             ];
 
@@ -126,7 +128,7 @@ final class EolScan
         Reconcile::autoResolveMissing('eol', $seen);
 
         if (Config::get('eol_hardware_enabled')) {
-            self::runHardware($run, $entity, $recursive);
+            self::runHardware($run, $entity, $recursive, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
         }
     }
 
@@ -173,8 +175,11 @@ final class EolScan
      * Hardware-warranty EOL pass. One Finding per Computer whose
      * `warranty_date + warranty_duration months` falls inside the hardware
      * horizon.
+     *
+     * @param int $hwHorizonDays  hoisted `eol_hardware_horizon_days` (I7)
+     * @param int $catId          hoisted Obsolescence category id (I7)
      */
-    private static function runHardware(RunLog $run, int $entity, int $recursive): void
+    private static function runHardware(RunLog $run, int $entity, int $recursive, int $hwHorizonDays, int $catId): void
     {
         global $DB;
 
@@ -183,6 +188,7 @@ final class EolScan
             'FROM'   => 'glpi_computers',
             'WHERE'  => [
                 'is_deleted'    => 0,
+                'is_template'   => 0,
                 'NOT'           => ['warranty_date' => null],
                 'warranty_date' => ['<>', ''],
             ],
@@ -200,7 +206,7 @@ final class EolScan
 
             $endDate = date('Y-m-d', $endTs);
             $days    = (int) floor((strtotime($endDate) - strtotime('today')) / 86400);
-            $sev     = Severity::forEolDays($days, (int) Config::get('eol_hardware_horizon_days'), 90, 180);
+            $sev     = Severity::forEolDays($days, $hwHorizonDays, 90, 180);
 
             if ($sev === null) {
                 FindingWriter::appendClearedNote(Code::eolHw($cid), $entity, 'warranty end beyond horizon', $run);
@@ -218,7 +224,7 @@ final class EolScan
                 'content'      => "Hardware EOL: $cname\nWarranty end: $endDate (warranty_date $warrantyDate + "
                     . (int) $c['warranty_duration'] . " months)",
                 'assessment_ref' => 'SAC/eol',
-                'plugin_riskregister_riskcategories_id' => FindingWriter::categoryId('Obsolescence', $entity),
+                'plugin_riskregister_riskcategories_id' => $catId,
                 'status'       => 'Open',
             ];
 
@@ -268,17 +274,20 @@ final class EolScan
     /**
      * Seed a throwaway OperatingSystem + Computer + link, and (optionally) an
      * endoflife.date mapping+cache row with the given EOL date.
+     *
+     * Core rows are created with `->add()` and the generated ids captured/returned
+     * (no hardcoded ~2.1e9 ids — those permanently bump InnoDB AUTO_INCREMENT).
+     *
+     * @return array{osId:int,cid:int}
      */
-    private static function scSeed(int $osId, int $cid, ?string $eolDate): void
+    private static function scSeed(?string $eolDate): array
     {
         global $DB;
-        $DB->insert('glpi_operatingsystems', ['id' => $osId, 'name' => '__sac_sc_os__']);
-        $DB->insert('glpi_computers', [
-            'id'          => $cid,
+
+        $osId = (int) (new \OperatingSystem())->add(['name' => '__sac_sc_os__']);
+        $cid  = (int) (new \Computer())->add([
             'name'        => '__sac_sc_pc__',
             'entities_id' => 0,
-            'is_deleted'  => 0,
-            'is_template' => 0,
         ]);
         $DB->insert('glpi_items_operatingsystems', [
             'items_id'            => $cid,
@@ -289,6 +298,24 @@ final class EolScan
             EolMap::putConfirmed($osId, self::SC_PRODUCT, '1', 1);
             EolCache::upsert(self::SC_PRODUCT, '1', ['eol_date' => $eolDate, 'raw_json' => '{}']);
         }
+
+        return ['osId' => $osId, 'cid' => $cid];
+    }
+
+    /** Seed a real `fields` LifeCycle row for one OS. Requires LifeCycleReader::available(). */
+    private static function scSeedLifecycle(int $osId, string $rawDate): void
+    {
+        global $DB;
+        $table = LifeCycleReader::tableName();
+        $col   = LifeCycleReader::dateColumnName();
+        $row   = ['items_id' => $osId, $col => $rawDate];
+        if ($DB->fieldExists($table, 'itemtype')) {
+            $row['itemtype'] = 'OperatingSystem';
+        }
+        if ($DB->fieldExists($table, 'entities_id')) {
+            $row['entities_id'] = 0;
+        }
+        $DB->insert($table, $row);
     }
 
     /** Highest `glpi_plugin_sac_run.id` right now — the floor for selfCheck cleanup. */
@@ -323,16 +350,26 @@ final class EolScan
             }
         }
 
+        $lcTable = \Plugin::isPluginActive('fields') ? LifeCycleReader::tableName() : '';
+
         foreach ($osIds as $osId) {
             $osId = (int) $osId;
+            if ($osId <= 0) {
+                continue;
+            }
             $DB->delete('glpi_plugin_sac_eolmap', ['operatingsystems_id' => $osId]);
             $DB->delete('glpi_items_operatingsystems', ['operatingsystems_id' => $osId]);
             $DB->delete('glpi_operatingsystems', ['id' => $osId]);
             $DB->delete('glpi_plugin_sac_reconcile', ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId]);
+            if ($lcTable !== '' && $DB->fieldExists($lcTable, 'items_id')) {
+                $DB->delete($lcTable, ['items_id' => $osId]);
+            }
         }
         $DB->delete('glpi_plugin_sac_eolcache', ['eol_product' => self::SC_PRODUCT]);
         foreach ($cids as $cid) {
-            $DB->delete('glpi_computers', ['id' => (int) $cid]);
+            if ((int) $cid > 0) {
+                $DB->delete('glpi_computers', ['id' => (int) $cid]);
+            }
         }
     }
 
@@ -342,22 +379,34 @@ final class EolScan
         $yesterday = date('Y-m-d', strtotime('-1 day'));
 
         return [
-            // EOL-1 — seeded OS past EOL → one Critical Finding + one Finding_Item.
-            'db/eol-1-critical-finding' => static function () use ($yesterday): void {
+            // EOL-1 — LifeCycle path ONLY. Seeds a real `fields` LifeCycle row
+            // (no _eolmap/_eolcache) and asserts the Finding names the lifecycle
+            // source. Skips with a logged note when `fields` LifeCycle is absent
+            // on this VM (the VM checklist already flags confirming that table).
+            'db/eol-1-lifecycle-source' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
-                $osId = 2147481001; $cid = 2147481002;
+                LifeCycleReader::resetProbeCache();
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
+                    echo "SKIP  db/eol-1-lifecycle-source — fields LifeCycle table/column not present on this VM\n";
+                    return;
+                }
+                $seed = self::scSeed(null); // no endoflife.date mapping
+                $osId = $seed['osId']; $cid = $seed['cid'];
                 $code = Code::eolOs($osId);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($osId, $cid, $yesterday);
+                    self::scSeedLifecycle($osId, $yesterday);
                     self::run(RunLog::begin('eol'));
 
                     $f    = new \GlpiPlugin\Riskregister\Finding();
                     $rows = $f->find(['code' => $code]);
-                    sac_assert_eq(count($rows), 1, 'EOL-1: exactly one Finding');
+                    sac_assert_eq(count($rows), 1, 'EOL-1: exactly one Finding via the LifeCycle date');
                     $row = $rows[array_key_first($rows)];
                     sac_assert_eq($row['severity'], 'Critical', 'EOL-1: severity Critical');
-                    sac_assert_eq($row['assessment_ref'], 'SAC/eol', 'EOL-1: assessment_ref');
+                    sac_assert(
+                        str_contains((string) $row['content'], 'source: lifecycle'),
+                        'EOL-1: content names the lifecycle source'
+                    );
 
                     $fi    = new \GlpiPlugin\Riskregister\Finding_Item();
                     $links = $fi->find([
@@ -371,14 +420,82 @@ final class EolScan
                 }
             },
 
-            // EOL-2 — re-run after the date moves in-horizon → same row, updated.
-            'db/eol-2-update-in-place' => static function () use ($yesterday): void {
+            // EOL-lifecycle-wins — LifeCycle date beats a differing endoflife.date
+            // mirror for the same OS.
+            'db/eol-lifecycle-wins' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
-                $osId = 2147481003; $cid = 2147481004;
+                LifeCycleReader::resetProbeCache();
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
+                    echo "SKIP  db/eol-lifecycle-wins — fields LifeCycle table/column not present on this VM\n";
+                    return;
+                }
+                // endoflife.date mirror says +200 days (would be Low); LifeCycle
+                // says yesterday (Critical).
+                $seed = self::scSeed(date('Y-m-d', strtotime('+200 days')));
+                $osId = $seed['osId']; $cid = $seed['cid'];
                 $code = Code::eolOs($osId);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($osId, $cid, $yesterday);
+                    self::scSeedLifecycle($osId, $yesterday);
+                    self::run(RunLog::begin('eol'));
+
+                    $f    = new \GlpiPlugin\Riskregister\Finding();
+                    $rows = $f->find(['code' => $code]);
+                    sac_assert_eq(count($rows), 1, 'EOL-lifecycle-wins: one Finding');
+                    $row = $rows[array_key_first($rows)];
+                    sac_assert(str_contains((string) $row['content'], 'source: lifecycle'), 'lifecycle source wins');
+                    sac_assert(str_contains((string) $row['content'], $yesterday), 'lifecycle date used, not the mirror date');
+                    sac_assert_eq($row['severity'], 'Critical', 'graded on the LifeCycle (past) date');
+                } finally {
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
+                }
+            },
+
+            // EOL-bad-date — a LifeCycle row with 0000-00-00 yields no Finding and
+            // one bad_date reconcile row.
+            'db/eol-bad-date' => static function (): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                LifeCycleReader::resetProbeCache();
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
+                    echo "SKIP  db/eol-bad-date — fields LifeCycle table/column not present on this VM\n";
+                    return;
+                }
+                global $DB;
+                $seed = self::scSeed(null);
+                $osId = $seed['osId']; $cid = $seed['cid'];
+                $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
+                try {
+                    self::scSeedLifecycle($osId, '0000-00-00');
+                    self::run(RunLog::begin('eol'));
+
+                    $f = new \GlpiPlugin\Riskregister\Finding();
+                    sac_assert_eq(count($f->find(['code' => $code])), 0, 'EOL-bad-date: no Finding for an unparseable LifeCycle date');
+
+                    $rc = $DB->request([
+                        'FROM'  => 'glpi_plugin_sac_reconcile',
+                        'WHERE' => [
+                            'signal_type'  => 'eol',
+                            'ref_itemtype' => 'OperatingSystem',
+                            'ref_id'       => $osId,
+                            'reason'       => 'bad_date',
+                        ],
+                    ])->current();
+                    sac_assert($rc !== null, 'EOL-bad-date: a bad_date reconcile row was written');
+                } finally {
+                    self::scTeardown([$osId], [$cid], [$code], $startId);
+                }
+            },
+
+            // EOL-2 — re-run after the endoflife.date date moves in-horizon → same
+            // row, re-graded in place.
+            'db/eol-2-update-in-place' => static function () use ($yesterday): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                $seed = self::scSeed($yesterday);
+                $osId = $seed['osId']; $cid = $seed['cid'];
+                $code = Code::eolOs($osId);
+                $startId = self::scRunFloor();
+                try {
                     self::run(RunLog::begin('eol'));
 
                     EolCache::upsert(self::SC_PRODUCT, '1', [
@@ -400,11 +517,11 @@ final class EolScan
             'db/eol-3-no-mapping-reconcile' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 global $DB;
-                $osId = 2147481005; $cid = 2147481006;
+                $seed = self::scSeed(null); // no mapping
+                $osId = $seed['osId']; $cid = $seed['cid'];
                 $code = Code::eolOs($osId);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($osId, $cid, null); // no mapping
                     self::run(RunLog::begin('eol'));
 
                     $f = new \GlpiPlugin\Riskregister\Finding();
@@ -429,11 +546,11 @@ final class EolScan
             'db/eol-4-signal-cleared' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 global $DB;
-                $osId = 2147481007; $cid = 2147481008;
+                $seed = self::scSeed($yesterday);
+                $osId = $seed['osId']; $cid = $seed['cid'];
                 $code = Code::eolOs($osId);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
 
                     $f       = new \GlpiPlugin\Riskregister\Finding();
@@ -463,14 +580,15 @@ final class EolScan
                 }
             },
 
-            // EOL-5 — endoflife.date path is reported as the source in `content`.
+            // EOL-5 — endoflife.date-only path (no LifeCycle row) is reported as
+            // the source in `content`.
             'db/eol-5-endoflife-source' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
-                $osId = 2147481009; $cid = 2147481010;
+                $seed = self::scSeed($yesterday);
+                $osId = $seed['osId']; $cid = $seed['cid'];
                 $code = Code::eolOs($osId);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($osId, $cid, $yesterday);
                     self::run(RunLog::begin('eol'));
 
                     $f    = new \GlpiPlugin\Riskregister\Finding();

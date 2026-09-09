@@ -100,39 +100,41 @@ final class EolCache
                 $p = '__sac_selftest__';
                 $c = '1.0';
 
-                sac_assert_eq(self::get($p, $c), null, 'cache miss before seed');
+                try {
+                    sac_assert_eq(self::get($p, $c), null, 'cache miss before seed');
 
-                self::upsert($p, $c, ['eol_date' => '2030-01-01', 'is_lts' => true, 'raw_json' => '{}']);
-                $hit = self::get($p, $c);
-                sac_assert_eq($hit['eol_date'], '2030-01-01', 'eol_date cached');
-                sac_assert_eq($hit['is_lts'], true, 'is_lts cached');
+                    self::upsert($p, $c, ['eol_date' => '2030-01-01', 'is_lts' => true, 'raw_json' => '{}']);
+                    $hit = self::get($p, $c);
+                    sac_assert_eq($hit['eol_date'], '2030-01-01', 'eol_date cached');
+                    sac_assert_eq($hit['is_lts'], true, 'is_lts cached');
 
-                self::upsert($p, $c, ['eol_date' => '2031-06-30', 'is_lts' => false]);
-                $hit = self::get($p, $c);
-                sac_assert_eq($hit['eol_date'], '2031-06-30', 'eol_date replaced in place');
-                $cpt = $DB->request(['COUNT' => 'x', 'FROM' => self::TABLE, 'WHERE' => ['eol_product' => $p]])
-                    ->current()['x'];
-                sac_assert_eq((int) $cpt, 1, 'still one cache row');
+                    self::upsert($p, $c, ['eol_date' => '2031-06-30', 'is_lts' => false]);
+                    $hit = self::get($p, $c);
+                    sac_assert_eq($hit['eol_date'], '2031-06-30', 'eol_date replaced in place');
+                    $cpt = $DB->request(['COUNT' => 'x', 'FROM' => self::TABLE, 'WHERE' => ['eol_product' => $p]])
+                        ->current()['x'];
+                    sac_assert_eq((int) $cpt, 1, 'still one cache row');
 
-                // stale detection: seed a map row, force the cache row old.
-                $DB->insert('glpi_plugin_sac_eolmap', [
-                    'operatingsystems_id' => 2147480001,
-                    'eol_product'         => $p,
-                    'eol_cycle'           => $c,
-                    'confidence'          => 'auto',
-                ]);
-                $DB->update(self::TABLE, ['date_fetched' => '2000-01-01 00:00:00'], ['eol_product' => $p, 'eol_cycle' => $c]);
-                $stale = self::staleProducts(30);
-                $found = false;
-                foreach ($stale as $s) {
-                    if ($s['product'] === $p && $s['cycle'] === $c) {
-                        $found = true;
+                    // stale detection: seed a map row, force the cache row old.
+                    $DB->insert('glpi_plugin_sac_eolmap', [
+                        'operatingsystems_id' => 2147480001,
+                        'eol_product'         => $p,
+                        'eol_cycle'           => $c,
+                        'confidence'          => 'auto',
+                    ]);
+                    $DB->update(self::TABLE, ['date_fetched' => '2000-01-01 00:00:00'], ['eol_product' => $p, 'eol_cycle' => $c]);
+                    $stale = self::staleProducts(30);
+                    $found = false;
+                    foreach ($stale as $s) {
+                        if ($s['product'] === $p && $s['cycle'] === $c) {
+                            $found = true;
+                        }
                     }
+                    sac_assert($found, 'stale product surfaced');
+                } finally {
+                    $DB->delete(self::TABLE, ['eol_product' => $p]);
+                    $DB->delete('glpi_plugin_sac_eolmap', ['operatingsystems_id' => 2147480001]);
                 }
-                sac_assert($found, 'stale product surfaced');
-
-                $DB->delete(self::TABLE, ['eol_product' => $p]);
-                $DB->delete('glpi_plugin_sac_eolmap', ['operatingsystems_id' => 2147480001]);
             },
         ];
     }

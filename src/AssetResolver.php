@@ -85,9 +85,11 @@ final class AssetResolver
                 ],
             ],
             'WHERE'      => [
-                'glpi_softwareversions.softwares_id'   => $softwareId,
-                'glpi_items_softwareversions.itemtype' => 'Computer',
-                'glpi_computers.is_deleted'            => 0,
+                'glpi_softwareversions.softwares_id'      => $softwareId,
+                'glpi_items_softwareversions.itemtype'    => 'Computer',
+                'glpi_items_softwareversions.is_deleted'  => 0,
+                'glpi_computers.is_deleted'               => 0,
+                'glpi_computers.is_template'              => 0,
             ],
         ]) as $row) {
             $resolved[(int) $row['id']] = (string) $row['name'];
@@ -108,18 +110,15 @@ final class AssetResolver
         return [
             'db/os-computers' => static function (): void {
                 global $DB;
-                $osId = 2147480501; // improbable ids, safe to seed/delete
-                $cId  = 2147480502;
+                // Create via ->add() and capture the generated ids — never
+                // hardcode ~2.1e9 ids into core tables (InnoDB keeps the bumped
+                // AUTO_INCREMENT after the delete).
+                $osId = 0;
+                $cId  = 0;
 
                 try {
-                    $DB->insert('glpi_operatingsystems', ['id' => $osId, 'name' => '__sac_os__']);
-                    $DB->insert('glpi_computers', [
-                        'id'          => $cId,
-                        'name'        => '__sac_pc__',
-                        'entities_id' => 0,
-                        'is_deleted'  => 0,
-                        'is_template' => 0,
-                    ]);
+                    $osId = (int) (new \OperatingSystem())->add(['name' => '__sac_os__']);
+                    $cId  = (int) (new \Computer())->add(['name' => '__sac_pc__', 'entities_id' => 0]);
                     $DB->insert('glpi_items_operatingsystems', [
                         'items_id'            => $cId,
                         'itemtype'            => 'Computer',

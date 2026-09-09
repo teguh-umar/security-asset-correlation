@@ -13,8 +13,11 @@ use GlpiPlugin\Sac\Reconcile;
  *
  * The list is seeded on install from `install/data/commercial_publishers.csv`
  * (one publisher name per line); {@see seedFromCsv()} find-or-creates the
- * matching `Manufacturer` and upserts the row. Ambiguous names go to the
- * Reconcile queue for an admin to fix + re-seed from Setup.
+ * matching `Manufacturer` and upserts the row. Ambiguous / unresolvable names
+ * are logged to the Reconcile queue for manual DB correction — there is no
+ * "re-seed from Setup" workflow. Each such row carries `ref_id = crc32(name)`
+ * so distinct publisher names do not collide on the `_reconcile` UNIQUE key
+ * `(signal_type, ref_itemtype, ref_id, reason)`.
  */
 class CommercialPublisher extends \CommonDBTM
 {
@@ -74,8 +77,12 @@ class CommercialPublisher extends \CommonDBTM
                 $matches[] = (int) $m['id'];
             }
 
+            // Distinct ref_id per name so ambiguous/unresolvable publishers do
+            // not overwrite one another on the _reconcile UNIQUE key (I9).
+            $refId = (int) crc32($name);
+
             if (count($matches) > 1) {
-                Reconcile::note('license', 'Manufacturer', 0, 'ambiguous', $name);
+                Reconcile::note('license', 'Manufacturer', $refId, 'ambiguous', $name);
                 continue;
             }
 
@@ -84,7 +91,7 @@ class CommercialPublisher extends \CommonDBTM
             } else {
                 $mid = (int) (new \Manufacturer())->add(['name' => $name, 'entities_id' => 0]);
                 if ($mid === 0) {
-                    Reconcile::note('license', 'Manufacturer', 0, 'no_mapping', $name);
+                    Reconcile::note('license', 'Manufacturer', $refId, 'no_mapping', $name);
                     continue;
                 }
             }

@@ -94,8 +94,14 @@ final class FindingWriter
     }
 
     /**
-     * Resolve a category name to its riskregister id in $entity. Returns 0 on
-     * miss (no auto-create) — callers pass 0 straight through.
+     * Resolve a category name to its riskregister id in $entity.
+     *
+     * `ImportSupport::categoryIdByName()` find-or-**creates** a RiskCategory
+     * (confirmed in riskregister's source) — it does NOT return 0 on a miss.
+     * SAC relies on riskregister v1.1.0+ having seeded the 4 canonical category
+     * names (Obsolescence, License Compliance, …) so no duplicate rows are
+     * created here. Returns 0 only when riskregister is absent or the name is
+     * blank; callers pass 0 straight through.
      */
     public static function categoryId(string $name, int $entity): int
     {
@@ -109,6 +115,12 @@ final class FindingWriter
      * Append a dated "Signal cleared" line to an existing Finding's `content`.
      * Never touches `status` or `severity`. No-op if the Finding is not found
      * or riskregister is absent.
+     *
+     * Idempotent per day: if `content` already contains "Signal cleared on
+     * <today>" the call is a no-op (no update, no counter bump). A same-day
+     * re-run is silent; a genuine re-clear on a later day appends once. This
+     * stops unbounded `content` growth and repeated `glpi_logs` / findings_cleared
+     * inflation when a signal stays cleared across many scans.
      */
     public static function appendClearedNote(string $code, int $entitiesId, string $why, RunLog $run): void
     {
@@ -122,10 +134,16 @@ final class FindingWriter
             return;
         }
 
-        $id  = (int) array_key_first($hit);
-        $row = reset($hit);
+        $id       = (int) array_key_first($hit);
+        $row      = reset($hit);
+        $existing = (string) ($row['content'] ?? '');
+
+        if (str_contains($existing, 'Signal cleared on ' . date('Y-m-d'))) {
+            return; // already cleared today — nothing to do
+        }
+
         $note = "\n\n---\nSignal cleared on " . date('Y-m-d') . ': ' . $why;
-        $f->update(['id' => $id, 'content' => (string) ($row['content'] ?? '') . $note]);
+        $f->update(['id' => $id, 'content' => $existing . $note]);
         $run->bump('findings_cleared');
     }
 
