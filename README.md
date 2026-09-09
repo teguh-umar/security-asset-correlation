@@ -54,9 +54,11 @@ All settings live in GLPI config context `plugin:sac` (Setup → General → SAC
 
 ## How Module 1 works (EOL/EOS)
 
-`cronEolScan` runs weekly. It walks every `OperatingSystem` that carries at least
-one non-deleted Computer and resolves an end-of-life date, first hit wins: (a) the
-operator-entered `fields` "LifeCycle" date, then (b) a confirmed/auto
+`cronEolScan` runs weekly. It walks every `OperatingSystem` that is linked to at
+least one Computer (the enumeration does not filter `is_deleted`/`is_template`;
+the per-OS `hostCount === 0` branch clears the Finding when every carrying
+Computer is trashed or a template) and resolves an end-of-life date, first hit
+wins: (a) the operator-entered `fields` "LifeCycle" date, then (b) a confirmed/auto
 `_eolmap → _eolcache` mirror of `endoflife.date`. If neither resolves, it writes a
 `no_mapping` row to the Reconcile queue and emits no Finding. A resolved date is
 graded against `eol_horizon_days` / the two severity thresholds and one `Finding`
@@ -105,8 +107,14 @@ Run on VM-HQ-GLPI after `bin/console glpi:plugin:install sac` +
 7. `endoflife.date` reachable from the GLPI host (egress) — if not, Module 1 runs
    LifeCycle-only; note it.
 8. `php plugins/sac/tools/selfcheck.php` → **all PASS**.
-9. Confirm `\Profile::dropdownRights` / `getRightsFor` signatures — `Profile.php`
-   carries a `Dropdown::showFromArray` fallback if they have drifted.
+9. Setup → Profiles → "Security Assessment" tab renders and **saves**. `Profile.php`
+   extends core `\Profile` and posts the rights matrix to core
+   `front/profile.form.php` (`\Profile::getFormURL()`) with `update` + `id` +
+   `_glpi_csrf_token` (via `Html::closeForm()`); core's
+   `prepareInputForUpdate()` / `post_updateItem()` persist the two rights
+   (`plugin_sac_finding`, `plugin_sac_config`) through
+   `ProfileRight::updateProfileRights()`. Ported from riskregister's VM-verified
+   `src/Profile.php`. Change a right, save, reload — it sticks.
 10. Confirm `csrf_token()` is registered in GLPI 11's Twig environment — the
     `config` and `reconcile` templates call it.
 11. Confirm `glpi_softwares.is_template` and `glpi_items_softwareversions.is_deleted`
@@ -123,9 +131,12 @@ PSR-4 `GlpiPlugin\Sac\` → `src/`, rights `plugin_sac_*`, cron `GlpiPlugin\Sac\
 
 ### Finding pipeline contract (from `riskregister`)
 
-- Primary path: SAC writes a CSV; import via `riskregister`'s
-  `\GlpiPlugin\Riskregister\Import\ImportSupport` helper + **Management → Risk
-  Register → Reconcile** for unmatched asset/owner text.
+- Primary path: SAC writes `Finding` rows **directly** through the
+  `FindingWriter` facade (`\GlpiPlugin\Riskregister\Finding` +
+  `Finding_Item`), status-preserving upsert keyed on `(entities_id, code)`. No
+  CSV, no datainjection. `FindingWriter::categoryId()` resolves (find-or-create)
+  the `RiskCategory` via `ImportSupport::categoryIdByName()`; SAC relies on
+  riskregister v1.1.0+ seeding the 4 canonical names.
 - `Finding` has UNIQUE `(entities_id, code)` — SAC must set a **stable,
   deterministic `code`** per finding for idempotent upsert
   (e.g. `SAC-EOL-<computers_id>-<software-slug>`), and a non-empty `scope_label`.
