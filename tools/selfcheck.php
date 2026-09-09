@@ -17,6 +17,9 @@
  * substring.
  */
 
+// CLI-only. Never reachable over HTTP even if the plugins dir is web-served.
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
 // --- Assertion helpers -------------------------------------------------------
 // Defined ABOVE the bootstrap require so they exist regardless of what GLPI
 // pulls in, and are callable from every check closure.

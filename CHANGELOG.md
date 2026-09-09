@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Config screen: `finding_entity` (and every other key) now renders from an
+  explicit `Config::FIELD_TYPES` map instead of guessing checkbox-vs-text from
+  the default value — an int-`0` entity id is no longer silently reset to 0 on
+  Save. `front/config.php` validates every posted value per type (bool / int /
+  entity / JSON array) and rejects bad input with an error message.
+- Setup → Profiles rights tab: ported to the riskregister approach — a real
+  `<form>` posting to core `front/profile.form.php`, so rights actually persist;
+  removed the `\Profile::getRightsFor()` call that could fatal on GLPI 11.
+- `tools/selfcheck.php` / `tools/export_findings.php`: refuse non-CLI (HTTP)
+  invocation.
+- `FindingWriter::appendClearedNote()` is idempotent per day — no more unbounded
+  `content` growth / repeated `findings_cleared` when a signal stays cleared.
+- EOL hardware pass and the License candidate/count queries now filter
+  `is_template` / `is_deleted` consistently.
+- Per-iteration `Config::get()` / category-id lookups hoisted out of the scan
+  loops.
+- License candidate query: ignored-category names are `$DB->quote()`d verbatim
+  (no character stripping) so accented names keep their ignore rule.
+- Ambiguous / unresolvable commercial-publisher names get a distinct
+  `ref_id = crc32(name)` on the Reconcile row so they no longer collide; they
+  are **logged to the Reconcile queue for manual DB correction** — there is no
+  "re-seed from Setup" workflow.
+- `LifeCycleReader`: `items_id` query guarded by `fieldExists`, pinned to
+  `itemtype = 'OperatingSystem'` when that column exists, and the table LIKE
+  fallback constrained to `glpi_plugin_fields_operatingsystem%lifecycle%` so it
+  cannot latch onto a Computer-attached container.
+- selfChecks: EOL-1 now exercises the LifeCycle path only; added
+  `db/eol-lifecycle-wins`, `db/eol-bad-date`, `db/writer-riskregister-inactive`
+  (spec §9.2 WRITER-1). `db/` seeds create core rows via `->add()` (captured
+  ids) instead of hardcoded ~2.1e9 ids.
+
 ## [1.0.0] - 2026-09-08
 
 ### Added

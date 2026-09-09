@@ -35,6 +35,9 @@ final class LicenseScan
         $checkOver = (bool) Config::get('license_check_overdeployment');
         $commercial = CommercialPublisher::activeManufacturerIds();
 
+        // Hoist the per-run-stable category id out of the software loop (I7).
+        $licenseCatId = FindingWriter::categoryId('License Compliance', $entity);
+
         /** @var array<int,array<int,array{name:string,installs:int,cids:array<int,int>}>> */
         $byPub = [];
 
@@ -91,7 +94,7 @@ final class LicenseScan
                         'severity'     => $sev,
                         'content'      => $content,
                         'assessment_ref' => 'SAC/license',
-                        'plugin_riskregister_riskcategories_id' => FindingWriter::categoryId('License Compliance', $entity),
+                        'plugin_riskregister_riskcategories_id' => $licenseCatId,
                         'status'       => 'Open',
                     ];
                     FindingWriter::upsert($input, array_map('intval', array_keys($assets['resolved'])), '', $run);
@@ -104,7 +107,7 @@ final class LicenseScan
             }
         }
 
-        self::emitMissingLicenceFindings($byPub, $commercial, $entity, $recursive, $run);
+        self::emitMissingLicenceFindings($byPub, $commercial, $entity, $recursive, $licenseCatId, $run);
     }
 
     /**
@@ -113,12 +116,14 @@ final class LicenseScan
      *
      * @param array<int,array<int,array{name:string,installs:int,cids:array<int,int>}>> $byPub
      * @param array<int,int> $commercial
+     * @param int $licenseCatId hoisted "License Compliance" category id (I7)
      */
     private static function emitMissingLicenceFindings(
         array $byPub,
         array $commercial,
         int $entity,
         int $recursive,
+        int $licenseCatId,
         RunLog $run
     ): void {
         $prodThreshold    = (int) Config::get('license_2a_products_threshold');
@@ -153,7 +158,7 @@ final class LicenseScan
                 'severity'     => $sev,
                 'content'      => $content,
                 'assessment_ref' => 'SAC/license',
-                'plugin_riskregister_riskcategories_id' => FindingWriter::categoryId('License Compliance', $entity),
+                'plugin_riskregister_riskcategories_id' => $licenseCatId,
                 'status'       => 'Open',
             ];
             FindingWriter::upsert($input, $allCids, '', $run);
@@ -175,8 +180,9 @@ final class LicenseScan
      * Built SQL via `$DB->doQuery()`: the NULL-safe `NOT IN` over a LEFT JOIN
      * plus the "has a referenced version" `EXISTS` is awkward to express safely
      * through the iterator criteria array (same call as `EolCache::staleProducts`).
-     * Category system-names are whitelist-filtered to `[A-Za-z0-9 _.-]` before
-     * being quoted, so this is injection-safe.
+     * Each ignored category name is passed through `$DB->quote()` verbatim — no
+     * character stripping — so a name like `Système` keeps its accents and its
+     * ignore rule still matches (I14).
      *
      * @param array<int,string> $ignore
      * @return iterable<array{id:int|string,name:?string,manufacturers_id:int|string}>
@@ -188,9 +194,9 @@ final class LicenseScan
         $catFilter = '';
         $safe      = [];
         foreach ($ignore as $c) {
-            $c = preg_replace('/[^A-Za-z0-9 _.\-]/', '', (string) $c);
+            $c = (string) $c;
             if ($c !== '') {
-                $safe[] = "'" . $c . "'";
+                $safe[] = $DB->quote($c);
             }
         }
         if ($safe !== []) {
@@ -277,48 +283,48 @@ final class LicenseScan
     /**
      * Seed Manufacturer (+ optional watch-list row), Software under it, a
      * SoftwareVersion and an install on a fresh Computer.
+     *
+     * Core rows are created with `->add()` and the generated ids captured — no
+     * hardcoded ~2.1e9 ids (those permanently bump InnoDB AUTO_INCREMENT).
+     *
+     * @return array{mid:int,sid:int,svid:int,cid:int}
      */
-    private static function scSeed(array $ids, bool $onWatchList, ?int $categoryId = null): void
+    private static function scSeed(bool $onWatchList, ?int $categoryId = null): array
     {
         global $DB;
 
-        $DB->insert('glpi_manufacturers', ['id' => $ids['mid'], 'name' => '__sac_sc_pub__']);
+        $mid = (int) (new \Manufacturer())->add(['name' => '__sac_sc_pub__']);
         if ($onWatchList) {
             $DB->insert(CommercialPublisher::TABLE, [
-                'manufacturers_id' => $ids['mid'],
+                'manufacturers_id' => $mid,
                 'is_active'        => 1,
                 'date_creation'    => date('Y-m-d H:i:s'),
                 'date_mod'         => date('Y-m-d H:i:s'),
             ]);
         }
-        $DB->insert('glpi_softwares', [
-            'id'                   => $ids['sid'],
-            'name'                 => '__sac_sc_sw__',
-            'entities_id'          => 0,
-            'manufacturers_id'     => $ids['mid'],
+        $sid = (int) (new \Software())->add([
+            'name'                  => '__sac_sc_sw__',
+            'entities_id'           => 0,
+            'manufacturers_id'      => $mid,
             'softwarecategories_id' => (int) ($categoryId ?? 0),
-            'is_deleted'           => 0,
-            'is_template'          => 0,
         ]);
-        $DB->insert('glpi_softwareversions', [
-            'id'           => $ids['svid'],
-            'softwares_id' => $ids['sid'],
+        $svid = (int) (new \SoftwareVersion())->add([
+            'softwares_id' => $sid,
             'name'         => '1.0',
             'entities_id'  => 0,
         ]);
-        $DB->insert('glpi_computers', [
-            'id'          => $ids['cid'],
+        $cid = (int) (new \Computer())->add([
             'name'        => '__sac_sc_pc1__',
             'entities_id' => 0,
-            'is_deleted'  => 0,
-            'is_template' => 0,
         ]);
         $DB->insert('glpi_items_softwareversions', [
-            'softwareversions_id' => $ids['svid'],
+            'softwareversions_id' => $svid,
             'itemtype'            => 'Computer',
-            'items_id'            => $ids['cid'],
+            'items_id'            => $cid,
             'is_deleted'          => 0,
         ]);
+
+        return ['mid' => $mid, 'sid' => $sid, 'svid' => $svid, 'cid' => $cid];
     }
 
     /** Highest `glpi_plugin_sac_run.id` right now — the floor for selfCheck cleanup. */
@@ -376,11 +382,10 @@ final class LicenseScan
             // LIC-1 — commercial publisher, one install, no licence → one 2a Low.
             'db/lic-1-missing-license' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
-                $ids   = ['mid' => 2147482001, 'sid' => 2147482002, 'svid' => 2147482003, 'cid' => 2147482004];
+                $ids   = self::scSeed(true);
                 $code  = Code::licMissing($ids['mid']);
                 $startId = self::scRunFloor();
                 try {
-                    self::scSeed($ids, true);
                     $run = RunLog::begin('license');
                     self::run($run);
                     $run->finish('ok');
@@ -409,15 +414,14 @@ final class LicenseScan
             'db/lic-2-overdeployment-and-clear' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 global $DB;
-                $ids  = [
-                    'mid' => 2147482011, 'sid' => 2147482012, 'svid' => 2147482013,
-                    'cid' => 2147482014, 'cid2' => 2147482015,
-                ];
+                $ids  = self::scSeed(true);
                 $missCode = Code::licMissing($ids['mid']);
                 $overCode = Code::licOver($ids['sid']);
                 $startId = self::scRunFloor();
+                // Capture the real config value BEFORE the check and restore it
+                // in finally — never force it to 0 (I8).
+                $prevOver = (int) Config::get('license_check_overdeployment');
                 try {
-                    self::scSeed($ids, true);
                     self::scConfig('license_check_overdeployment', 0);
                     $run = RunLog::begin('license');
                     self::run($run);
@@ -434,9 +438,8 @@ final class LicenseScan
                         'entities_id'  => 0,
                         'is_deleted'   => 0,
                     ]);
-                    $DB->insert('glpi_computers', [
-                        'id' => $ids['cid2'], 'name' => '__sac_sc_pc2__',
-                        'entities_id' => 0, 'is_deleted' => 0, 'is_template' => 0,
+                    $ids['cid2'] = (int) (new \Computer())->add([
+                        'name' => '__sac_sc_pc2__', 'entities_id' => 0,
                     ]);
                     $DB->insert('glpi_items_softwareversions', [
                         'softwareversions_id' => $ids['svid'],
@@ -461,7 +464,7 @@ final class LicenseScan
                         'LIC-2: 2a Finding gains a cleared note once licensed'
                     );
                 } finally {
-                    self::scConfig('license_check_overdeployment', 0);
+                    self::scConfig('license_check_overdeployment', $prevOver);
                     self::scTeardown($ids, [$missCode, $overCode], $startId);
                 }
             },
@@ -469,17 +472,11 @@ final class LicenseScan
             // LIC-3 — software in an ignored category is not scanned.
             'db/lic-3-ignored-category' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
-                global $DB;
-                $ids  = [
-                    'mid' => 2147482021, 'sid' => 2147482022, 'svid' => 2147482023,
-                    'cid' => 2147482024, 'catid' => 2147482025,
-                ];
-                $code = Code::licMissing($ids['mid']);
+                $catid = (int) (new \SoftwareCategory())->add(['name' => 'system_component']);
+                $ids   = self::scSeed(true, $catid) + ['catid' => $catid];
+                $code  = Code::licMissing($ids['mid']);
                 $startId = self::scRunFloor();
                 try {
-                    $DB->insert('glpi_softwarecategories', ['id' => $ids['catid'], 'name' => 'system_component']);
-                    self::scSeed($ids, true, $ids['catid']);
-
                     $run = RunLog::begin('license');
                     self::run($run);
                     $run->finish('ok');
