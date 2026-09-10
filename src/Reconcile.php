@@ -98,7 +98,7 @@ class Reconcile extends \CommonDBTM
      *
      * @return array<int,array{
      *     id:int, signal_type:string, ref_itemtype:string, ref_id:int,
-     *     reason:string, detail:string, label:string,
+     *     reason:string, detail:string, label:string, is_resolved:bool,
      *     date_firstseen:?string, date_lastseen:?string
      * }>
      */
@@ -134,6 +134,7 @@ class Reconcile extends \CommonDBTM
                 'reason'         => (string) $row['reason'],
                 'detail'         => $detail,
                 'label'          => $label,
+                'is_resolved'    => (bool) ($row['is_resolved'] ?? 0),
                 'date_firstseen' => $row['date_firstseen'],
                 'date_lastseen'  => $row['date_lastseen'],
             ];

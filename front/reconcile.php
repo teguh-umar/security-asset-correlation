@@ -30,11 +30,17 @@ if (isset($_POST['resolve'])) {
     Html::back();
 }
 
+$includeResolved = (bool) ($_GET['resolved'] ?? false);
+
 Html::header(__('Security Assessment', 'sac'), '', 'sac', 'reconcile');
 
+$base = Html::getPrefixedUrl('/plugins/sac/front/reconcile.php');
+
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/reconcile.html.twig', [
-    'action' => Html::getPrefixedUrl('/plugins/sac/front/reconcile.php'),
-    'rows'   => Reconcile::listForDisplay(),
+    'action'           => $base,
+    'rows'             => Reconcile::listForDisplay($includeResolved),
+    'include_resolved' => $includeResolved,
+    'toggle_url'       => $base . ($includeResolved ? '' : '?resolved=1'),
 ]);
 
 Html::footer();
