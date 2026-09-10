@@ -21,7 +21,8 @@
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="subheader text-uppercase">{{ card.module }}</div>
                     {% if card.status %}
-                        <span class="badge bg-secondary">{{ card.status }}</span>
+                        {% set _sc = card.status == 'ok' ? 'bg-success' : (card.status == 'error' ? 'bg-danger' : 'bg-secondary') %}
+                        <span class="badge {{ _sc }}">{{ card.status }}</span>
                     {% endif %}
                 </div>
 
@@ -33,16 +34,20 @@
                     {% endif %}
                 </div>
 
-                <div class="mt-2">
-                {% for k, v in card.counts %}
-                    <span class="badge bg-secondary me-1">{{ k }}: {{ v }}</span>
-                {% endfor %}
-                </div>
-
-                <div class="mt-2">
-                    <span class="text-muted">{{ __('Open reconcile', 'sac') }}:</span>
-                    <strong>{{ card.open_reconcile }}</strong>
-                </div>
+                <table class="table table-sm table-borderless mb-0 mt-2">
+                    <tbody>
+                    {% for k, v in card.counts %}
+                        <tr>
+                            <td class="text-muted py-0">{{ k|replace({'_': ' '}) }}</td>
+                            <td class="text-end fw-bold py-0">{{ v }}</td>
+                        </tr>
+                    {% endfor %}
+                        <tr>
+                            <td class="text-muted py-0">{{ __('open reconcile', 'sac') }}</td>
+                            <td class="text-end fw-bold py-0">{{ card.open_reconcile }}</td>
+                        </tr>
+                    </tbody>
+                </table>
 
                 {% if card.findings_url %}
                     <div class="mt-2">

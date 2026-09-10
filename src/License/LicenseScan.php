@@ -42,6 +42,7 @@ final class LicenseScan
         $byPub = [];
 
         foreach (self::candidateSoftware($ignore) as $sw) {
+          try {
             $sid    = (int) $sw['id'];
             $swName = (string) ($sw['name'] ?? '');
             $mid    = (int) ($sw['manufacturers_id'] ?? 0);
@@ -105,6 +106,11 @@ final class LicenseScan
                     FindingWriter::appendClearedNote(Code::licOver($sid), $entity, 'no longer over-deployed', $run);
                 }
             }
+          } catch (\Throwable $e) {
+            // One bad software row must not abort the whole scan.
+            $run->bump('errors');
+            \Toolbox::logInFile('sac', 'LicenseScan software ' . ($sw['id'] ?? '?') . ': ' . $e->getMessage() . "\n");
+          }
         }
 
         self::emitMissingLicenceFindings($byPub, $commercial, $entity, $recursive, $licenseCatId, $run);
@@ -239,10 +245,14 @@ final class LicenseScan
         global $DB;
 
         $sid = (int) $softwareId;
-        $sql = "SELECT COALESCE(SUM(`number`), 0)              AS `seats`,
-                       MIN(NULLIF(`expire`, '0000-00-00'))     AS `exp`,
-                       COUNT(*)                                AS `n`,
-                       COALESCE(SUM(`number` <= 0), 0)         AS `unlim`
+        // `expire` is a DATE column; legacy rows hold '0000-00-00', which MySQL in
+        // NO_ZERO_DATE / strict mode rejects as a DATE literal inside an
+        // expression. Compare as CHAR so no DATE validation runs; the caller does
+        // a lexical 'Y-m-d' compare anyway.
+        $sql = "SELECT COALESCE(SUM(`number`), 0)                       AS `seats`,
+                       MIN(NULLIF(CAST(`expire` AS CHAR), '0000-00-00')) AS `exp`,
+                       COUNT(*)                                         AS `n`,
+                       COALESCE(SUM(`number` <= 0), 0)                  AS `unlim`
                 FROM `glpi_softwarelicenses`
                 WHERE `softwares_id` = $sid AND `is_deleted` = 0";
 
