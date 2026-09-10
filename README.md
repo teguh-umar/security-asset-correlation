@@ -91,6 +91,23 @@ php bin/console glpi:plugin:install sac --username=<admin>
 php bin/console glpi:plugin:activate sac
 ```
 
+### Upgrading
+
+The web **Setup → Plugins → Upgrade** button is broken on the suite's GLPI 11
+build (`BadRequestHttpException` at `front/plugin.form.php`). Upgrade from the CLI
+instead:
+
+```bash
+sudo -u nginx php /data/www/glpi/bin/console plugin:install sac --force
+sudo -u nginx php /data/www/glpi/bin/console plugin:activate sac
+```
+
+`--force` is required for an already-installed plugin. `plugin_sac_install()` is
+partially upgrade-safe today — it skips existing tables and tops up new config
+keys — but **column additions on existing tables need a real `\Migration` object
+first** (see Roadmap). Until then, treat a schema-changing upgrade as
+uninstall + reinstall.
+
 ---
 
 ## Configuration
