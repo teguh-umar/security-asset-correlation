@@ -30,6 +30,13 @@ if (isset($_POST['resolve'])) {
     Html::back();
 }
 
+if (isset($_POST['reopen'])) {
+    Session::checkRight('plugin_sac_finding', UPDATE);
+    Reconcile::reopen((int) $_POST['reopen']);
+    Session::addMessageAfterRedirect(__('Reconcile signal re-opened', 'sac'));
+    Html::back();
+}
+
 $includeResolved = (bool) ($_GET['resolved'] ?? false);
 
 Html::header(__('Security Assessment', 'sac'), '', 'sac', 'reconcile');

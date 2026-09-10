@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.3] - 2026-09-10
+
+### Added
+
+- **Reconcile page: "Re-open" button on resolved rows** — sends a signal back to
+  the open queue so a wrong mapping can be corrected. `Reconcile::reopen()`.
+- **"Mapping" column** — every OS reconcile row shows its current
+  `_eolmap` product/cycle (`—` when unmapped). The inline "Map & resolve" form is
+  now **pre-filled** with the existing mapping, so re-mapping is an edit, not a
+  retype. `EolMap::put()` already upserts, so the next `EolScan` updates the
+  affected Finding in place.
+
 ## [1.0.2] - 2026-09-10
 
 ### Added
