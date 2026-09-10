@@ -24,14 +24,22 @@ final class LifeCycleReader
     /** Resolved EOL date column. null = not yet probed, '' = none found. */
     private static ?string $dateCol = null;
 
-    /** Exact table name the `fields` plugin would generate for OS + "LifeCycle". */
+    /**
+     * Exact table the `fields` plugin generates for the "LifeCycle" container
+     * on Operating Systems. `Container::getSystemName()` does
+     * `strtolower(str_replace('\\','',$itemtype) . preg_replace('/s$/','',$name))`
+     * → `operatingsystem` + `lifecycle` = `operatingsystemlifecycle`, and GLPI's
+     * `getTable()` pluralises the generated class → `…lifecycles`.
+     * (Confirmed against pluginsGLPI/fields `inc/container.class.php`.)
+     */
     private const EXACT_TABLE = 'glpi_plugin_fields_operatingsystemlifecycles';
 
     /**
-     * LIKE fallback when the container was named differently. Constrained to
-     * contain `operatingsystem` so it can never latch onto a Computer-attached
-     * `fields` container (the `fields` plugin always prefixes the generated
-     * table with the lower-cased itemtype) (I10).
+     * LIKE fallback when the container was named slightly differently (e.g. a
+     * singular table `…operatingsystemlifecycle`). Constrained to contain
+     * `operatingsystem` so it can never latch onto a Computer-attached `fields`
+     * container (the plugin always prefixes the table with the lower-cased
+     * itemtype) (I10).
      */
     private const TABLE_LIKE = 'glpi_plugin_fields_operatingsystem%lifecycle%';
 
@@ -135,10 +143,15 @@ final class LifeCycleReader
 
     /**
      * Resolve the EOL date column once and cache it. Probe order:
-     *   1. `endoflife`
-     *   2. `endoflife_date`
-     *   3. the sole `date`/`datetime`/`timestamp` column that is not
-     *      `date_creation` / `date_mod`
+     *   1. `endoflifefield` — the `fields` plugin (v1.24 `Field::prepareName()`)
+     *      builds a column as `getSystemNameFromLabel(label) . 'field'`, so a
+     *      field labelled "EndOfLife" becomes `endoflifefield`.
+     *   2. `endoflife` / `endoflife_date` — an admin-overridden system name.
+     *   3. the sole `date`/`datetime`/`timestamp` column that is not an audit
+     *      column (`date_creation` / `date_mod`) — the container in the
+     *      screenshot has exactly one Date field (the other is a Header, which
+     *      the `fields` plugin never adds a column for), so this reliably
+     *      resolves it whatever the label was.
      * Returns '' when the table is unknown or no single date column stands out.
      */
     private static function dateColumn(): string
@@ -154,13 +167,11 @@ final class LifeCycleReader
             return '';
         }
 
-        if ($DB->fieldExists($table, 'endoflife')) {
-            self::$dateCol = 'endoflife';
-            return self::$dateCol;
-        }
-        if ($DB->fieldExists($table, 'endoflife_date')) {
-            self::$dateCol = 'endoflife_date';
-            return self::$dateCol;
+        foreach (['endoflifefield', 'endoflife', 'endoflife_date', 'endoflifedatefield'] as $col) {
+            if ($DB->fieldExists($table, $col)) {
+                self::$dateCol = $col;
+                return self::$dateCol;
+            }
         }
 
         $audit      = ['date_creation', 'date_mod'];

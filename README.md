@@ -218,11 +218,18 @@ and integration contracts live in `_pgn-glpi-suite.md` (not in this repo).
 Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` +
 `glpi:plugin:activate sac` (check `files/_log/php-errors.log` after each step):
 
-1. Confirm the `fields` "LifeCycle" generated table + column names, and whether it
-   keys rows by `items_id`/`itemtype` or `operatingsystems_id` — `LifeCycleReader`
-   probes `glpi_plugin_fields_operatingsystem%lifecycle%`, date column `endoflife`,
-   and filters `itemtype = 'OperatingSystem'` when that column exists. If `fields`
-   is absent, Module 1 runs `endoflife.date`-only (logged once per run).
+1. Confirm the `fields` "LifeCycle" table + column. Per pluginsGLPI/fields source
+   (`inc/container.class.php`, `inc/field.class.php`) the expected shape is:
+   - **table** `glpi_plugin_fields_operatingsystemlifecycles`
+     (`getSystemName()` → `operatingsystem` + `lifecycle`, then GLPI pluralises)
+   - **date column** `endoflifefield` (`Field::prepareName()` appends `field` to
+     the label-derived name — "EndOfLife" → `endoflife` → `endoflifefield`)
+   - **row key** `items_id` (= the `operatingsystems_id`) + `itemtype = 'OperatingSystem'`
+   `LifeCycleReader` probes the exact table then `…operatingsystem%lifecycle%`,
+   tries `endoflifefield` / `endoflife` / `endoflife_date` then the sole non-audit
+   date column, and pins `itemtype = 'OperatingSystem'` when that column exists.
+   Run `SHOW COLUMNS FROM glpi_plugin_fields_operatingsystemlifecycles;` to verify.
+   If `fields` is absent, Module 1 runs `endoflife.date`-only (logged once per run).
 2. GLPI Inventory Plugin present; Collect task usable; **Deploy task disabled**
    (needed for Module 3 — verify now).
 3. `riskregister` **v1.1.0+ deployed** so `ImportSupport::categoryIdByName`
