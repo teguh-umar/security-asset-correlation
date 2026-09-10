@@ -1,14 +1,37 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.1] - 2026-09-10
+
+First real deploy on VM-HQ-GLPI (GLPI 11) surfaced three schema-drift bugs.
+
+### Fixed
+
+- **EOL hardware pass** queried `glpi_computers.warranty_date` /
+  `warranty_duration` — those columns do not exist in GLPI 11. Warranty data
+  lives in `glpi_infocoms` (keyed by `itemtype` + `items_id`). `runHardware()`
+  now joins `glpi_infocoms`, is `tableExists`/`fieldExists`-guarded, skips
+  `warranty_duration <= 0` (permanent / none), and the call is wrapped so a
+  hardware-pass failure logs + bumps `errors` instead of failing the whole EOL
+  run (the OS pass already stands).
+- **License aggregate query** used `MIN(NULLIF(`expire`, '0000-00-00'))` — MySQL
+  in `NO_ZERO_DATE` / strict mode rejects the `'0000-00-00'` DATE literal, so
+  `LicenseScan` aborted on the first software with a legacy zero expiry. Now
+  `CAST(`expire` AS CHAR)` before the compare. The per-software loop is also
+  wrapped in try/catch so one bad row bumps `errors` and continues.
+- `reconcile_open` run counter is now bumped with the count of OSes routed to the
+  Reconcile queue this run (was always `0`).
 
 ### Changed
 
-- `LifeCycleReader` date-column probe now tries **`endoflifefield`** first —
+- Overview cards: counters render as a plain two-column table instead of dark
+  low-contrast badges; the status badge is colour-coded (`ok` green, `error`
+  red).
+- `LifeCycleReader` date-column probe tries **`endoflifefield`** first —
   pluginsGLPI/fields `Field::prepareName()` appends `field` to the label-derived
   name, so "EndOfLife" becomes `endoflifefield` (falls through to `endoflife`,
-  `endoflife_date`, then the sole non-audit date column). Table/column naming
-  documented in the README VM checklist against the fields-plugin source.
+  `endoflife_date`, then the sole non-audit date column). **VM-confirmed**: table
+  `glpi_plugin_fields_operatingsystemlifecycles`, column `endoflifefield`
+  (`varchar(255)`), keyed `items_id` + `itemtype = 'OperatingSystem'`.
 
 ## [1.0.0] - 2026-09-10
 

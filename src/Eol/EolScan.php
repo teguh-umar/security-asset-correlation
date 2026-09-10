@@ -126,9 +126,17 @@ final class EolScan
         }
 
         Reconcile::autoResolveMissing('eol', $seen);
+        $run->bump('reconcile_open', count($seen));
 
         if (Config::get('eol_hardware_enabled')) {
-            self::runHardware($run, $entity, $recursive, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
+            // A hardware-pass failure (schema drift, strict-mode date) must not
+            // fail the whole EOL run — the OS pass above already stands.
+            try {
+                self::runHardware($run, $entity, $recursive, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
+            } catch (\Throwable $e) {
+                $run->bump('errors');
+                \Toolbox::logInFile('sac', 'EolScan hardware pass: ' . $e->getMessage() . "\n");
+            }
         }
     }
 
@@ -176,6 +184,11 @@ final class EolScan
      * `warranty_date + warranty_duration months` falls inside the hardware
      * horizon.
      *
+     * Warranty data lives in `glpi_infocoms` (Infocom / "Financial and
+     * administrative information"), keyed by `itemtype` + `items_id` — NOT on
+     * `glpi_computers` in GLPI 11. Guarded so an unexpected schema degrades to a
+     * no-op instead of a fatal.
+     *
      * @param int $hwHorizonDays  hoisted `eol_hardware_horizon_days` (I7)
      * @param int $catId          hoisted Obsolescence category id (I7)
      */
@@ -183,14 +196,34 @@ final class EolScan
     {
         global $DB;
 
+        if (!$DB->tableExists('glpi_infocoms') || !$DB->fieldExists('glpi_infocoms', 'warranty_date')) {
+            \Toolbox::logInFile('sac', "EolScan: hardware pass skipped — glpi_infocoms.warranty_date not found\n");
+            return;
+        }
+
         foreach ($DB->request([
-            'SELECT' => ['id', 'name', 'warranty_date', 'warranty_duration'],
-            'FROM'   => 'glpi_computers',
-            'WHERE'  => [
-                'is_deleted'    => 0,
-                'is_template'   => 0,
-                'NOT'           => ['warranty_date' => null],
-                'warranty_date' => ['<>', ''],
+            'SELECT'     => [
+                'glpi_computers.id AS id',
+                'glpi_computers.name AS name',
+                'glpi_infocoms.warranty_date AS warranty_date',
+                'glpi_infocoms.warranty_duration AS warranty_duration',
+            ],
+            'FROM'       => 'glpi_infocoms',
+            'INNER JOIN' => [
+                'glpi_computers' => [
+                    'ON' => [
+                        'glpi_infocoms'  => 'items_id',
+                        'glpi_computers' => 'id',
+                    ],
+                ],
+            ],
+            'WHERE'      => [
+                'glpi_infocoms.itemtype'          => 'Computer',
+                'glpi_computers.is_deleted'       => 0,
+                'glpi_computers.is_template'      => 0,
+                'NOT'                             => ['glpi_infocoms.warranty_date' => null],
+                // -1 = permanent (never EOL), 0 = no warranty — skip both.
+                'glpi_infocoms.warranty_duration' => ['>', 0],
             ],
         ]) as $c) {
             $cid          = (int) $c['id'];
