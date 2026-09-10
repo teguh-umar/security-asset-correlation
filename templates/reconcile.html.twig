@@ -15,6 +15,30 @@
         </a>
     </div>
     <div class="card-body">
+        <div class="alert alert-info">
+            <p class="mb-1">
+                {{ __('An EOL / no_mapping row means SAC found an operating system but has no end-of-life date for it.', 'sac') }}
+            </p>
+            <ul class="mb-0">
+                <li>
+                    {{ __('Enter the endoflife.date product slug + release cycle (see', 'sac') }}
+                    <a href="https://endoflife.date" target="_blank" rel="noopener">endoflife.date</a>{{ __('), e.g.', 'sac') }}
+                    <code>rhel</code> / <code>9</code>, <code>windows-server</code> / <code>2019</code>,
+                    <code>ubuntu</code> / <code>22.04</code>, <code>vmware-esxi</code> / <code>7.0</code> —
+                    {{ __('then', 'sac') }} <strong>{{ __('Map &amp; resolve', 'sac') }}</strong>.
+                    {{ __('SAC then keeps this OS up to date automatically.', 'sac') }}
+                </li>
+                <li>
+                    {{ __('Or set the date directly on', 'sac') }}
+                    <strong>{{ __('Assets → Operating Systems → (OS) → LifeCycle → EndOfLife', 'sac') }}</strong>
+                    — {{ __('that takes priority over the mapping and needs no slug.', 'sac') }}
+                </li>
+                <li>
+                    <strong>{{ __('Resolve', 'sac') }}</strong>
+                    {{ __('just dismisses the row without a mapping (no Finding for that OS).', 'sac') }}
+                </li>
+            </ul>
+        </div>
     {% if rows is empty %}
         <div class="text-center text-muted">{{ __('Nothing to reconcile', 'sac') }}</div>
     {% else %}
