@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.4] - 2026-09-10
+
+### Added
+
+- Reconcile page: an inline help panel — what an `eol` / `no_mapping` row means,
+  how to fill `product` / `cycle` (with an endoflife.date link + examples), the
+  LifeCycle-tab alternative, and what plain "Resolve" does.
+
 ## [1.0.3] - 2026-09-10
 
 ### Added
