@@ -99,6 +99,7 @@ class Reconcile extends \CommonDBTM
      * @return array<int,array{
      *     id:int, signal_type:string, ref_itemtype:string, ref_id:int,
      *     reason:string, detail:string, label:string, is_resolved:bool,
+     *     eol_product:string, eol_cycle:string,
      *     date_firstseen:?string, date_lastseen:?string
      * }>
      */
@@ -107,6 +108,16 @@ class Reconcile extends \CommonDBTM
         global $DB;
 
         $where = $includeResolved ? [] : ['is_resolved' => 0];
+
+        // Current OS→endoflife.date mappings, so an `eol` row shows what it was
+        // (or would be) mapped to.
+        $maps = [];
+        foreach ($DB->request(['FROM' => 'glpi_plugin_sac_eolmap']) as $m) {
+            $maps[(int) $m['operatingsystems_id']] = [
+                (string) ($m['eol_product'] ?? ''),
+                (string) ($m['eol_cycle'] ?? ''),
+            ];
+        }
 
         $out = [];
         foreach ($DB->request([
@@ -126,6 +137,10 @@ class Reconcile extends \CommonDBTM
                 }
             }
 
+            [$prod, $cyc] = ($itemtype === 'OperatingSystem' && isset($maps[$refId]))
+                ? $maps[$refId]
+                : ['', ''];
+
             $out[] = [
                 'id'             => (int) $row['id'],
                 'signal_type'    => (string) $row['signal_type'],
@@ -135,6 +150,8 @@ class Reconcile extends \CommonDBTM
                 'detail'         => $detail,
                 'label'          => $label,
                 'is_resolved'    => (bool) ($row['is_resolved'] ?? 0),
+                'eol_product'    => $prod,
+                'eol_cycle'      => $cyc,
                 'date_firstseen' => $row['date_firstseen'],
                 'date_lastseen'  => $row['date_lastseen'],
             ];
@@ -173,6 +190,18 @@ class Reconcile extends \CommonDBTM
     {
         global $DB;
         $DB->update(self::TABLE, ['is_resolved' => 1], ['id' => (int) $id]);
+    }
+
+    /**
+     * Send a resolved row back to the open queue so an admin can re-map / re-act
+     * on it (e.g. a wrong EOL mapping). The existing `_eolmap` row, if any, is
+     * left in place — the inline form is pre-filled with it and re-submitting
+     * `map` overwrites it.
+     */
+    public static function reopen(int $id): void
+    {
+        global $DB;
+        $DB->update(self::TABLE, ['is_resolved' => 0], ['id' => (int) $id]);
     }
 
     /**
