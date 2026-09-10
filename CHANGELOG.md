@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `LifeCycleReader` date-column probe now tries **`endoflifefield`** first —
+  pluginsGLPI/fields `Field::prepareName()` appends `field` to the label-derived
+  name, so "EndOfLife" becomes `endoflifefield` (falls through to `endoflife`,
+  `endoflife_date`, then the sole non-audit date column). Table/column naming
+  documented in the README VM checklist against the fields-plugin source.
+
+## [1.0.0] - 2026-09-10
+
+Released `sacv1.0.0.zip`. First tagged release — code-complete, **never run on a
+real GLPI instance** (mode-A); the deploy must follow the README VM verification
+checklist.
+
 ### Fixed
 
 - Config screen: `finding_entity` (and every other key) now renders from an
@@ -34,8 +48,6 @@
   `db/eol-lifecycle-wins`, `db/eol-bad-date`, `db/writer-riskregister-inactive`
   (spec §9.2 WRITER-1). `db/` seeds create core rows via `->add()` (captured
   ids) instead of hardcoded ~2.1e9 ids.
-
-## [1.0.0] - 2026-09-08
 
 ### Added
 
