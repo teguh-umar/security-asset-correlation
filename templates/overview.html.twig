@@ -4,6 +4,13 @@
  # `cards` = [{module, date_end, status, counts, open_reconcile, findings_url}]
  # `riskregister` = bool (riskregister plugin available).
  #}
+{% set count_labels = {
+    'scanned':          __('Scanned', 'sac'),
+    'findings_upserted':__('Findings written', 'sac'),
+    'findings_cleared': __('Findings cleared', 'sac'),
+    'reconcile_open':   __('Reconcile added', 'sac'),
+    'errors':           __('Errors', 'sac')
+} %}
 <div class="row row-cards">
 {% if cards is empty %}
     <div class="col-12">
@@ -15,18 +22,23 @@
     </div>
 {% else %}
     {% for card in cards %}
+    {% set st = card.status|default('') %}
+    {% set st_cls = st == 'ok' ? 'status-green' : (st == 'error' ? 'status-red' : 'status-yellow') %}
     <div class="col-sm-6 col-lg-4">
         <div class="card">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div class="subheader text-uppercase">{{ card.module }}</div>
-                    {% if card.status %}
-                        {% set _sc = card.status == 'ok' ? 'bg-success' : (card.status == 'error' ? 'bg-danger' : 'bg-secondary') %}
-                        <span class="badge {{ _sc }}">{{ card.status }}</span>
+            <div class="card-status-top {{ st == 'error' ? 'bg-danger' : (st == 'ok' ? 'bg-success' : 'bg-secondary') }}"></div>
+            <div class="card-header">
+                <h3 class="card-title text-uppercase">{{ card.module }}</h3>
+                <div class="card-actions">
+                    {% if st %}
+                        <span class="status {{ st_cls }}">
+                            <span class="status-dot"></span>{{ st == 'ok' ? __('OK', 'sac') : (st == 'error' ? __('Error', 'sac') : st) }}
+                        </span>
                     {% endif %}
                 </div>
-
-                <div class="text-muted small mt-1">
+            </div>
+            <div class="card-body">
+                <div class="text-muted small mb-2">
                     {% if card.date_end %}
                         {{ __('Last run', 'sac') }}: {{ card.date_end }}
                     {% else %}
@@ -34,24 +46,24 @@
                     {% endif %}
                 </div>
 
-                <table class="table table-sm table-borderless mb-0 mt-2">
-                    <tbody>
-                    {% for k, v in card.counts %}
-                        <tr>
-                            <td class="text-muted py-0">{{ k|replace({'_': ' '}) }}</td>
-                            <td class="text-end fw-bold py-0">{{ v }}</td>
-                        </tr>
-                    {% endfor %}
-                        <tr>
-                            <td class="text-muted py-0">{{ __('open reconcile', 'sac') }}</td>
-                            <td class="text-end fw-bold py-0">{{ card.open_reconcile }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div class="datagrid">
+                {% for k, v in card.counts %}
+                    <div class="datagrid-item">
+                        <div class="datagrid-title">{{ count_labels[k]|default(k|replace({'_': ' '})) }}</div>
+                        <div class="datagrid-content{{ k == 'errors' and v > 0 ? ' text-danger fw-bold' : '' }}">{{ v }}</div>
+                    </div>
+                {% endfor %}
+                    <div class="datagrid-item">
+                        <div class="datagrid-title">{{ __('Open reconcile', 'sac') }}</div>
+                        <div class="datagrid-content fw-bold">{{ card.open_reconcile }}</div>
+                    </div>
+                </div>
 
                 {% if card.findings_url %}
-                    <div class="mt-2">
-                        <a href="{{ card.findings_url }}">{{ __('View findings', 'sac') }}</a>
+                    <div class="mt-3">
+                        <a href="{{ card.findings_url }}" class="btn btn-sm btn-outline-primary">
+                            {{ __('View findings', 'sac') }}
+                        </a>
                     </div>
                 {% endif %}
             </div>
@@ -62,7 +74,7 @@
 </div>
 
 {% if not riskregister %}
-    <div class="alert alert-info mt-2">
+    <div class="alert alert-warning mt-3">
         {{ __('The riskregister plugin is not active — findings are not being written.', 'sac') }}
     </div>
 {% endif %}

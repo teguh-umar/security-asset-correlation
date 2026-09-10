@@ -1,9 +1,18 @@
 {#
- # SAC — reconcile queue. One row per open signal; resolve inline.
+ # SAC — reconcile queue. One row per signal; resolve inline.
  # Autoescape ON — no |raw on plugin data. CSRF token field on every form.
- # `action` = front/reconcile.php prefixed URL. `rows` = Reconcile::listForDisplay().
+ # `action` = front/reconcile.php prefixed URL. `rows` = Reconcile::listForDisplay(include_resolved).
+ # `include_resolved` bool, `toggle_url` = link that flips the view.
  #}
 <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="card-title">
+            {{ include_resolved ? __('All reconcile signals', 'sac') : __('Open reconcile signals', 'sac') }}
+        </span>
+        <a href="{{ toggle_url }}" class="btn btn-sm btn-outline-secondary">
+            {{ include_resolved ? __('Hide resolved', 'sac') : __('Show resolved', 'sac') }}
+        </a>
+    </div>
     <div class="card-body">
     {% if rows is empty %}
         <div class="text-center text-muted">{{ __('Nothing to reconcile', 'sac') }}</div>
@@ -11,6 +20,7 @@
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
+                    <th>{{ __('Status', 'sac') }}</th>
                     <th>{{ __('Signal', 'sac') }}</th>
                     <th>{{ __('Reason', 'sac') }}</th>
                     <th>{{ __('Reference', 'sac') }}</th>
@@ -21,7 +31,14 @@
             </thead>
             <tbody>
             {% for row in rows %}
-                <tr>
+                <tr class="{{ row.is_resolved ? 'text-muted' : '' }}">
+                    <td>
+                        {% if row.is_resolved %}
+                            <span class="badge bg-success">{{ __('Resolved', 'sac') }}</span>
+                        {% else %}
+                            <span class="badge bg-warning">{{ __('Open', 'sac') }}</span>
+                        {% endif %}
+                    </td>
                     <td>{{ row.signal_type }}</td>
                     <td>{{ row.reason }}</td>
                     <td>
@@ -33,19 +50,20 @@
                     <td>{{ row.date_firstseen }}</td>
                     <td>{{ row.date_lastseen }}</td>
                     <td>
-                    {% if row.signal_type == 'eol' and row.reason == 'no_mapping' %}
-                        <form method="post" action="{{ action }}" class="d-inline-flex gap-1 align-items-center me-2">
-                            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="id" value="{{ row.id }}">
-                            <input type="text" name="product" class="form-control form-control-sm"
-                                   placeholder="{{ __('product', 'sac') }}" required>
-                            <input type="text" name="cycle" class="form-control form-control-sm"
-                                   placeholder="{{ __('cycle', 'sac') }}" required>
-                            <button type="submit" name="map" value="{{ row.id }}" class="btn btn-sm btn-primary">
-                                {{ __('Map & resolve', 'sac') }}
-                            </button>
-                        </form>
-                    {% endif %}
+                    {% if not row.is_resolved %}
+                        {% if row.signal_type == 'eol' and row.reason == 'no_mapping' %}
+                            <form method="post" action="{{ action }}" class="d-inline-flex gap-1 align-items-center me-2">
+                                <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="id" value="{{ row.id }}">
+                                <input type="text" name="product" class="form-control form-control-sm"
+                                       placeholder="{{ __('product', 'sac') }}" required>
+                                <input type="text" name="cycle" class="form-control form-control-sm"
+                                       placeholder="{{ __('cycle', 'sac') }}" required>
+                                <button type="submit" name="map" value="{{ row.id }}" class="btn btn-sm btn-primary">
+                                    {{ __('Map & resolve', 'sac') }}
+                                </button>
+                            </form>
+                        {% endif %}
                         <form method="post" action="{{ action }}" class="d-inline">
                             <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="id" value="{{ row.id }}">
@@ -54,6 +72,9 @@
                                 {{ __('Resolve', 'sac') }}
                             </button>
                         </form>
+                    {% else %}
+                        <span class="text-muted">&mdash;</span>
+                    {% endif %}
                     </td>
                 </tr>
             {% endfor %}

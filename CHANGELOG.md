@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.2] - 2026-09-10
+
+### Added
+
+- **Reconcile page: "Show resolved" toggle** (`?resolved=1`). Resolved rows carry
+  a green "Resolved" badge, greyed text, and no action buttons; open rows a
+  yellow "Open" badge. `listForDisplay()` now returns `is_resolved` per row.
+
+### Changed
+
+- **Overview cards rebuilt on Tabler components** (`card-status-top`, `status`
+  dot, `datagrid`) instead of dark `badge bg-secondary` pills — readable in both
+  light and dark themes. Counters get human labels ("Findings written",
+  "Reconcile added", …); a non-zero error count renders red.
+
 ## [1.0.1] - 2026-09-10
 
 First real deploy on VM-HQ-GLPI (GLPI 11) surfaced three schema-drift bugs.
