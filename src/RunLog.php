@@ -23,6 +23,8 @@ final class RunLog
         'findings_cleared'  => 0,
         'reconcile_open'    => 0,
         'errors'            => 0,
+        'skipped'           => 0,       // v1.1.0: a seed-CSV `_skip` pattern (e.g. Kubernetes)
+        'cache_pending'     => 0,       // v1.1.0: mapped, but endoflife.date not cached yet — self-healing
     ];
 
     private function __construct(int $id)

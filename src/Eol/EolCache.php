@@ -55,6 +55,71 @@ final class EolCache
     }
 
     /**
+     * Fetch and cache every distinct product in $pairs whose `_eolcache` row
+     * is missing or older than `Config::get('eol_cache_max_age_days')`.
+     * Called between EolScan's two passes (spec §6/§10) so a fresh seed-CSV
+     * match still has a dated Finding to emit the same run (spec §15 Q2).
+     * One GET per product upserts every cycle it returns (not just the one
+     * asked for — cheap, and pre-warms sibling versions). Network/shape
+     * failures bump `errors` and leave the existing cache untouched.
+     *
+     * @param array<int,array{product:string,cycle:string}> $pairs
+     */
+    public static function ensureFresh(array $pairs, \GlpiPlugin\Sac\RunLog $run): void
+    {
+        $maxAge = (int) \GlpiPlugin\Sac\Config::get('eol_cache_max_age_days');
+
+        $products = [];
+        foreach ($pairs as $p) {
+            $products[$p['product']] = true;
+        }
+
+        foreach (array_keys($products) as $product) {
+            if ($product === '' || !self::isStale($product, $maxAge)) {
+                continue;
+            }
+
+            $body = \GlpiPlugin\Sac\Http::get('https://endoflife.date/api/' . rawurlencode($product) . '.json');
+            if ($body === null) {
+                $run->bump('errors');
+                continue;
+            }
+            $data = json_decode($body, true);
+            if (!is_array($data)) {
+                $run->bump('errors');
+                continue;
+            }
+            foreach ($data as $entry) {
+                if (!is_array($entry) || !isset($entry['cycle'])) {
+                    continue;
+                }
+                $eol     = $entry['eol'] ?? null;
+                $support = $entry['support'] ?? null;
+                self::upsert($product, (string) $entry['cycle'], [
+                    'eol_date' => is_string($eol) ? $eol : null,
+                    'eos_date' => is_string($support) ? $support : null,
+                    'is_lts'   => (bool) ($entry['lts'] ?? false),
+                    'raw_json' => json_encode($entry),
+                ]);
+            }
+        }
+    }
+
+    /** Whether $product has no cache row at all, or none fresher than $maxAgeDays. */
+    private static function isStale(string $product, int $maxAgeDays): bool
+    {
+        global $DB;
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$maxAgeDays} days"));
+        $row    = $DB->request([
+            'SELECT' => ['MAX(date_fetched) AS newest'],
+            'FROM'   => self::TABLE,
+            'WHERE'  => ['eol_product' => $product],
+        ])->current();
+        $newest = is_array($row) ? ($row['newest'] ?? null) : null;
+        return $newest === null || (string) $newest < $cutoff;
+    }
+
+    /**
      * Product/cycle pairs mapped in `_eolmap` whose cache row is missing or
      * older than $maxAgeDays.
      *
@@ -134,6 +199,31 @@ final class EolCache
                 } finally {
                     $DB->delete(self::TABLE, ['eol_product' => $p]);
                     $DB->delete('glpi_plugin_sac_eolmap', ['operatingsystems_id' => 2147480001]);
+                }
+            },
+            'db/eolcache-ensurefresh' => static function (): void {
+                global $DB;
+                $product = '__sac_ensurefresh__';
+                \GlpiPlugin\Sac\Http::$transport = static function (string $url, int $timeout): ?string {
+                    return json_encode([
+                        ['cycle' => '1', 'eol' => '2020-01-01', 'support' => '2019-01-01', 'lts' => false],
+                        ['cycle' => '2', 'eol' => '2030-01-01', 'support' => '2029-01-01', 'lts' => true],
+                    ]);
+                };
+                try {
+                    $run = \GlpiPlugin\Sac\RunLog::begin('eol');
+                    self::ensureFresh([['product' => $product, 'cycle' => '2']], $run);
+                    $run->finish('ok');
+
+                    $hit = self::get($product, '2');
+                    sac_assert($hit !== null, 'ensureFresh cached the requested cycle');
+                    sac_assert_eq($hit['eol_date'], '2030-01-01', 'requested cycle date cached');
+
+                    $hit1 = self::get($product, '1');
+                    sac_assert($hit1 !== null, 'ensureFresh also cached a sibling cycle from the same API response');
+                } finally {
+                    \GlpiPlugin\Sac\Http::$transport = null;
+                    $DB->delete(self::TABLE, ['eol_product' => $product]);
                 }
             },
         ];
