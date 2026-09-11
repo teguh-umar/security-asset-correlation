@@ -82,7 +82,7 @@ class CommercialPublisher extends \CommonDBTM
             $refId = (int) crc32($name);
 
             if (count($matches) > 1) {
-                Reconcile::note('license', 'Manufacturer', $refId, 'ambiguous', $name);
+                Reconcile::note('license', 'Manufacturer', $refId, 0, 'ambiguous', $name);
                 continue;
             }
 
@@ -91,7 +91,7 @@ class CommercialPublisher extends \CommonDBTM
             } else {
                 $mid = (int) (new \Manufacturer())->add(['name' => $name, 'entities_id' => 0]);
                 if ($mid === 0) {
-                    Reconcile::note('license', 'Manufacturer', $refId, 'no_mapping', $name);
+                    Reconcile::note('license', 'Manufacturer', $refId, 0, 'no_mapping', $name);
                     continue;
                 }
             }
