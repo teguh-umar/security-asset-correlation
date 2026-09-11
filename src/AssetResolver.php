@@ -54,6 +54,47 @@ final class AssetResolver
     }
 
     /**
+     * Computers currently running the exact (OperatingSystem,
+     * OperatingSystemVersion) pair — the v1.1.0 EOL grain (spec
+     * 2026-09-10-eol-multidim-design.md §7.1). `verId = 0` is a legal,
+     * distinct bucket ("version dimension not set/known").
+     *
+     * @return array{resolved:array<int,string>,unresolved:array<int,string>}
+     */
+    public static function computersForOsVersion(int $osId, int $verId): array
+    {
+        global $DB;
+        $resolved = [];
+        foreach ($DB->request([
+            'SELECT'     => [
+                'glpi_computers.id AS id',
+                'glpi_computers.name AS name',
+            ],
+            'DISTINCT'   => true,
+            'FROM'       => 'glpi_items_operatingsystems',
+            'INNER JOIN' => [
+                'glpi_computers' => [
+                    'ON' => [
+                        'glpi_items_operatingsystems' => 'items_id',
+                        'glpi_computers'              => 'id',
+                    ],
+                ],
+            ],
+            'WHERE'      => [
+                'glpi_items_operatingsystems.operatingsystems_id'        => $osId,
+                'glpi_items_operatingsystems.operatingsystemversions_id' => $verId,
+                'glpi_items_operatingsystems.itemtype'                   => 'Computer',
+                'glpi_computers.is_deleted'                              => 0,
+                'glpi_computers.is_template'                             => 0,
+            ],
+        ]) as $row) {
+            $resolved[(int) $row['id']] = (string) $row['name'];
+        }
+
+        return ['resolved' => $resolved, 'unresolved' => []];
+    }
+
+    /**
      * Computers with any version of the given Software installed.
      *
      * @return array{count:int,resolved:array<int,string>}
@@ -136,6 +177,40 @@ final class AssetResolver
                 } finally {
                     $DB->delete('glpi_items_operatingsystems', ['operatingsystems_id' => $osId]);
                     $DB->delete('glpi_computers', ['id' => $cId]);
+                    $DB->delete('glpi_operatingsystems', ['id' => $osId]);
+                }
+            },
+            'db/os-version-computers' => static function (): void {
+                global $DB;
+                $osId = 0; $verId = 0; $cId = 0; $cId2 = 0;
+
+                try {
+                    $osId  = (int) (new \OperatingSystem())->add(['name' => '__sac_os2__']);
+                    $verId = (int) (new \OperatingSystemVersion())->add([
+                        'name' => '__sac_ver__', 'operatingsystems_id' => $osId,
+                    ]);
+                    $cId   = (int) (new \Computer())->add(['name' => '__sac_pc2a__', 'entities_id' => 0]);
+                    $cId2  = (int) (new \Computer())->add(['name' => '__sac_pc2b__', 'entities_id' => 0]);
+                    $DB->insert('glpi_items_operatingsystems', [
+                        'items_id' => $cId, 'itemtype' => 'Computer',
+                        'operatingsystems_id' => $osId, 'operatingsystemversions_id' => $verId,
+                    ]);
+                    // Same OS, version 0 (unknown) — must NOT show up for the specific version.
+                    $DB->insert('glpi_items_operatingsystems', [
+                        'items_id' => $cId2, 'itemtype' => 'Computer',
+                        'operatingsystems_id' => $osId, 'operatingsystemversions_id' => 0,
+                    ]);
+
+                    $res = self::computersForOsVersion($osId, $verId);
+                    sac_assert_eq($res['resolved'], [$cId => '__sac_pc2a__'], 'only the exact (os,ver) pair is returned');
+
+                    $res0 = self::computersForOsVersion($osId, 0);
+                    sac_assert_eq($res0['resolved'], [$cId2 => '__sac_pc2b__'], 'ver_id=0 is its own distinct bucket');
+                } finally {
+                    $DB->delete('glpi_items_operatingsystems', ['operatingsystems_id' => $osId]);
+                    $DB->delete('glpi_computers', ['id' => $cId]);
+                    $DB->delete('glpi_computers', ['id' => $cId2]);
+                    $DB->delete('glpi_operatingsystemversions', ['id' => $verId]);
                     $DB->delete('glpi_operatingsystems', ['id' => $osId]);
                 }
             },
