@@ -490,3 +490,15 @@ Still open (VM-verification facts, not design):
   `$sheet->toArray(null,true,false,false)`.
 - **integrasipaman → Finding** — high-risk terminal command on a production asset
   as a candidate Finding (owned by the integrasipaman side).
+- **Rename SAC → ACS ("Asset Correlation Security")** — decided 2026-09-11, full
+  internal rename (namespace `GlpiPlugin\Acs\`, tables `glpi_plugin_acs_*`,
+  config `plugin:acs`, rights `plugin_acs_*`, menu sector `acs`, Finding codes
+  `ACS-EOL-…`/`ACS-LIC-…`, `assessment_ref` `ACS/eol`/`ACS/license`, twig
+  namespace `@acs`, plugin folder + repo). **Scheduled as its own plan after
+  v1.1.0 (EOL multidim) is implemented and deployed** — doing it alongside the
+  v1.1.0 re-keying would stack two breaking VM migrations (table rename +
+  Finding-code rename) into one upgrade. Needs its own migration (old
+  `glpi_plugin_sac_*` tables/config/rights → new `acs_*` ones, old `SAC-*`
+  Findings superseded the same way v1.1.0 supersedes old-format codes) and a
+  heads-up to `riskregister` (Finding `code`/`assessment_ref` prefix changes)
+  and `nvd` (their spec note references the `sac` plan path) before it ships.
