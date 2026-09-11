@@ -1,0 +1,21 @@
+name_pattern,product,cycle_source,cycle_rule,comment
+red hat enterprise linux,rhel,version,major,
+rocky linux,rocky-linux,version,major,
+almalinux,almalinux,version,major,
+oracle linux,oracle-linux,version,major,
+oracle,oracle-linux,version,major,VM inventory labels Oracle Linux as just Oracle
+centos stream,centos-stream,version,major,
+centos,centos,version,major,
+ubuntu,ubuntu,version,yy.mm,
+debian,debian,version,major,
+suse linux enterprise server,sles,version,major,
+suse linux enterprise,sles,version,major,
+opensuse leap,opensuse,version,yy.mm,
+amazon linux,amazon-linux,version,major,
+windows server,windows-server,name,winsrv,version dropdown is usually blank
+windows,windows,name,winclient,
+vmware esxi,vmware-esxi,version,xy,
+esxi,vmware-esxi,version,xy,
+vmware vcenter,vmware-vcenter,version,xy,
+kubernetes,_skip,,,appliance node not an OS lifecycle
+k3s,_skip,,,
