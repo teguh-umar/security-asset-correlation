@@ -48,8 +48,8 @@ final class EolProducts
             return self::$rules;
         }
 
-        fgetcsv($fh); // discard the header row
-        while (($row = fgetcsv($fh)) !== false) {
+        fgetcsv($fh, 0, ',', '"', '\\'); // discard the header row
+        while (($row = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
             if (!isset($row[0]) || trim((string) $row[0]) === '') {
                 continue; // blank line
             }
