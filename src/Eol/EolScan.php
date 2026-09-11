@@ -5,6 +5,7 @@ namespace GlpiPlugin\Sac\Eol;
 use GlpiPlugin\Sac\AssetResolver;
 use GlpiPlugin\Sac\Code;
 use GlpiPlugin\Sac\Config;
+use GlpiPlugin\Sac\EolMatch;
 use GlpiPlugin\Sac\FindingWriter;
 use GlpiPlugin\Sac\Http;
 use GlpiPlugin\Sac\Reconcile;
@@ -12,17 +13,27 @@ use GlpiPlugin\Sac\RunLog;
 use GlpiPlugin\Sac\Severity;
 
 /**
- * Module 1 orchestration — EOL/EOS scan.
+ * Module 1 orchestration — EOL/EOS scan, v1.1.0 grain: one Finding per
+ * (operatingsystems_id, operatingsystemversions_id) pair (spec
+ * 2026-09-10-eol-multidim-design.md §6), because GLPI 11 splits an OS across
+ * dropdown dimensions and the OS name/id alone is not a valid EOL key.
  *
- * `run()` walks every OperatingSystem that has at least one Computer, resolves an
- * end-of-life date (fields "LifeCycle" first, then the endoflife.date mirror),
- * grades it against the configured horizon and emits one `Finding` per OS through
- * {@see FindingWriter}. Hardware-warranty EOL is a second pass gated on
- * `eol_hardware_enabled`. `refreshCache()` re-fetches stale endoflife.date rows.
+ * `run()` is two-pass:
+ *   Pass 1 ({@see resolveMapping()}) walks every pair in live inventory and
+ *   resolves each to either a `fields` "LifeCycle" date or a
+ *   `{product,cycle}` to look up — via an existing `_eolmap` row, or a fresh
+ *   seed-CSV match ({@see EolMatch}), which auto-writes `_eolmap` on the
+ *   spot. A cache-fill step ({@see EolCache::ensureFresh()}) then fetches
+ *   anything newly mapped, so a brand-new match still has a dated Finding to
+ *   emit the SAME run (spec §15 Q2).
+ *   Pass 2 grades each resolved pair and emits/clears its Finding.
  *
- * Every mutation of riskregister state goes through {@see FindingWriter}; every
- * reconcile signal through {@see Reconcile}. This class never writes GLPI core
- * tables or the `fields` tables.
+ * Hardware-warranty EOL is a separate, unchanged pass gated on
+ * `eol_hardware_enabled` (spec §14 — out of scope for v1.1.0).
+ *
+ * Every mutation of riskregister state goes through {@see FindingWriter};
+ * every reconcile signal through {@see Reconcile}. This class never writes
+ * GLPI core tables or the `fields` tables.
  */
 final class EolScan
 {
@@ -31,12 +42,10 @@ final class EolScan
 
     public static function run(RunLog $run): void
     {
-        global $DB;
-
         $entity    = (int) Config::get('finding_entity');
         $recursive = (int) Config::get('finding_recursive');
 
-        // Hoist per-run-stable lookups out of the OS loop (I7): the severity
+        // Hoist per-run-stable lookups out of the pair loop (I7): the severity
         // thresholds and the Obsolescence category id do not change within a run.
         $horizonDays = (int) Config::get('eol_horizon_days');
         $highDays    = (int) Config::get('eol_severity_high_days');
@@ -46,75 +55,92 @@ final class EolScan
         /** @var array<int,string> composite reconcile keys seen this run */
         $seen = [];
 
-        foreach ($DB->request([
-            'SELECT'     => [
-                'glpi_operatingsystems.id AS id',
-                'glpi_operatingsystems.name AS name',
-            ],
-            'DISTINCT'   => true,
-            'FROM'       => 'glpi_operatingsystems',
-            'INNER JOIN' => [
-                'glpi_items_operatingsystems' => [
-                    'ON' => [
-                        'glpi_items_operatingsystems' => 'operatingsystems_id',
-                        'glpi_operatingsystems'       => 'id',
-                    ],
-                ],
-            ],
-            'WHERE'      => [
-                'glpi_items_operatingsystems.itemtype' => 'Computer',
-            ],
-        ]) as $osRow) {
-            $osId   = (int) $osRow['id'];
-            $osName = (string) ($osRow['name'] ?? '');
+        $pairs     = self::pairsInInventory();
+        $needCache = [];
+        /** @var array<string,array{kind:string,date?:string,source?:string,product?:string,cycle?:string}> */
+        $resolved  = [];
 
-            [$date, $source] = self::resolveDate($osId, $osName, $run);
+        // Pass 1 — resolve every pair to a lifecycle date or a {product,cycle}.
+        foreach ($pairs as $pair) {
+            $key     = $pair['os_id'] . ':' . $pair['ver_id'];
+            $mapping = self::resolveMapping($pair['os_id'], $pair['ver_id'], $pair['os_name'], $pair['ver_name'], $seen, $run);
+            if ($mapping === null) {
+                continue; // bad_date / no_mapping / skip already handled inside resolveMapping()
+            }
+            $resolved[$key] = $mapping;
+            if ($mapping['kind'] === 'mapped') {
+                $needCache[] = ['product' => $mapping['product'], 'cycle' => $mapping['cycle']];
+            }
+        }
 
-            if ($date === false) {
-                $seen[] = "OperatingSystem:$osId:bad_date";
-                $run->bump('scanned');
+        // Cache fill BETWEEN the passes — a seed-CSV match made this run still
+        // gets a dated Finding this run (spec §15 Q2).
+        if ($needCache !== []) {
+            EolCache::ensureFresh($needCache, $run);
+        }
+
+        // Pass 2 — grade + emit using whatever the cache fill just made available.
+        foreach ($pairs as $pair) {
+            $osId    = $pair['os_id'];
+            $verId   = $pair['ver_id'];
+            $osName  = $pair['os_name'];
+            $verName = $pair['ver_name'];
+            $key     = "$osId:$verId";
+
+            if (!isset($resolved[$key])) {
                 continue;
             }
-            if ($date === null) {
-                $seen[] = "OperatingSystem:$osId:no_mapping";
-                $run->bump('scanned');
-                continue;
+            $mapping = $resolved[$key];
+
+            if ($mapping['kind'] === 'lifecycle') {
+                $date   = $mapping['date'];
+                $source = $mapping['source'];
+            } else {
+                $cached = EolCache::get($mapping['product'], $mapping['cycle']);
+                if ($cached === null || $cached['eol_date'] === null) {
+                    // Mapped but not dated yet (endoflife.date unreachable, or
+                    // the cycle genuinely absent upstream) — self-healing, not
+                    // a problem to surface. Next run / EolCacheRefresh retries.
+                    $run->bump('cache_pending');
+                    $run->bump('scanned');
+                    continue;
+                }
+                $date   = $cached['eol_date'];
+                $source = 'endoflife.date';
             }
 
+            $code = Code::eolOs($osId, $verId);
             $days = (int) floor((strtotime($date) - strtotime('today')) / 86400);
             $sev  = Severity::forEolDays($days, $horizonDays, $highDays, $mediumDays);
 
-            $assets    = AssetResolver::computersForOs($osId);
+            $assets    = AssetResolver::computersForOsVersion($osId, $verId);
             $hostCount = count($assets['resolved']);
 
-            // The OS still has an inventory row, but every Computer carrying it is
-            // trashed / a template. Treat as "no longer in live inventory" (spec
-            // §4.5) — clear any prior Finding and stop re-asserting.
+            // The pair still has an inventory row, but every Computer carrying
+            // it is trashed / a template. Treat as "no longer in live
+            // inventory" (spec §4.5) — clear any prior Finding and stop
+            // re-asserting.
             if ($hostCount === 0) {
-                FindingWriter::appendClearedNote(Code::eolOs($osId), $entity, 'OS not in live inventory', $run);
+                FindingWriter::appendClearedNote($code, $entity, 'pair not in live inventory', $run);
                 $run->bump('scanned');
                 continue;
             }
 
             if ($sev === null) {
-                FindingWriter::appendClearedNote(
-                    Code::eolOs($osId),
-                    $entity,
-                    'EOL beyond horizon or OS not in inventory',
-                    $run
-                );
+                FindingWriter::appendClearedNote($code, $entity, 'EOL beyond horizon', $run);
                 $run->bump('scanned');
                 continue;
             }
 
+            $label = trim("$osName $verName");
             $input = [
                 'entities_id'  => $entity,
                 'is_recursive' => $recursive,
-                'code'         => Code::eolOs($osId),
-                'name'         => substr("EOL: $osName", 0, 255),
-                'scope_label'  => substr("$osName ×$hostCount", 0, 255),
+                'code'         => $code,
+                'name'         => substr("EOL: $label", 0, 255),
+                'scope_label'  => substr("$label ×$hostCount", 0, 255),
                 'severity'     => $sev,
-                'content'      => "OS: $osName\nEnd of life: $date (source: $source)\nAffected hosts:\n"
+                'content'      => "OS: $label\nEnd of life: $date (source: $source)\nAffected hosts:\n"
                     . implode("\n", array_map(fn ($n) => "- $n", $assets['resolved'])),
                 'assessment_ref' => 'SAC/eol',
                 'plugin_riskregister_riskcategories_id' => $obsolescenceCatId,
@@ -141,53 +167,126 @@ final class EolScan
     }
 
     /**
-     * Resolve the end-of-life date for one OperatingSystem.
+     * Every distinct (operatingsystems_id, operatingsystemversions_id) pair
+     * currently on a live Computer, with both dropdown names joined in.
+     * LEFT JOIN on the version dropdown so ver_id = 0 (version dimension
+     * empty/unset) rows survive with ver_name = ''.
      *
-     * @return array{0:string|false|null,1:string} `[date, sourceTag]` —
-     *         `string` date → a real EOL date with its source tag;
-     *         `false` → a bad_date reconcile was noted, skip the OS;
-     *         `null` → a no_mapping reconcile was noted, skip the OS.
+     * @return array<int,array{os_id:int,ver_id:int,os_name:string,ver_name:string}>
      */
-    private static function resolveDate(int $osId, string $osName, RunLog $run): array
+    private static function pairsInInventory(): array
     {
-        // (a) fields "LifeCycle" — read-only, operator-entered.
-        $life = LifeCycleReader::endOfLifeFor($osId);
+        global $DB;
+
+        $out = [];
+        foreach ($DB->request([
+            'SELECT'     => [
+                'glpi_items_operatingsystems.operatingsystems_id AS os_id',
+                'glpi_items_operatingsystems.operatingsystemversions_id AS ver_id',
+                'glpi_operatingsystems.name AS os_name',
+                'glpi_operatingsystemversions.name AS ver_name',
+            ],
+            'DISTINCT'   => true,
+            'FROM'       => 'glpi_items_operatingsystems',
+            'INNER JOIN' => [
+                'glpi_operatingsystems' => [
+                    'ON' => [
+                        'glpi_items_operatingsystems' => 'operatingsystems_id',
+                        'glpi_operatingsystems'       => 'id',
+                    ],
+                ],
+            ],
+            'LEFT JOIN'  => [
+                'glpi_operatingsystemversions' => [
+                    'ON' => [
+                        'glpi_items_operatingsystems'  => 'operatingsystemversions_id',
+                        'glpi_operatingsystemversions' => 'id',
+                    ],
+                ],
+            ],
+            'WHERE'      => [
+                'glpi_items_operatingsystems.itemtype' => 'Computer',
+            ],
+        ]) as $row) {
+            $out[] = [
+                'os_id'    => (int) $row['os_id'],
+                'ver_id'   => (int) $row['ver_id'],
+                'os_name'  => (string) ($row['os_name'] ?? ''),
+                'ver_name' => (string) ($row['ver_name'] ?? ''),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Resolve one (os,ver) pair to either a lifecycle date or a
+     * {product,cycle} to look up in the cache. Writes Reconcile signals and
+     * bumps run counters for every terminal outcome (bad_date / no_mapping /
+     * skip) so `run()` only has to act on a non-null return — every pair
+     * bumps `scanned` exactly once, either here (terminal cases) or in
+     * Pass 2 (every other case).
+     *
+     * @param array<int,string> $seen composite reconcile keys, updated by reference
+     * @return array{kind:'lifecycle',date:string,source:string}
+     *       | array{kind:'mapped',product:string,cycle:string}
+     *       | null
+     */
+    private static function resolveMapping(
+        int $osId,
+        int $verId,
+        string $osName,
+        string $verName,
+        array &$seen,
+        RunLog $run
+    ): ?array {
+        // (a) fields "LifeCycle" — version-level wins over OS-level
+        // (LifeCycleReader handles that precedence internally).
+        $life = LifeCycleReader::endOfLifeFor($osId, $verId);
         if (is_string($life)) {
-            return [$life, 'lifecycle'];
+            return ['kind' => 'lifecycle', 'date' => $life, 'source' => 'lifecycle'];
         }
         if ($life === false) {
-            Reconcile::note('eol', 'OperatingSystem', $osId, 'bad_date', $osName);
-            return [false, ''];
+            Reconcile::note('eol', 'OperatingSystem', $osId, $verId, 'bad_date', trim("$osName $verName"));
+            $seen[] = "OperatingSystem:$osId:$verId:bad_date";
+            $run->bump('scanned');
+            return null;
         }
-        // $life === null → no LifeCycle row, continue.
+        // $life === null -> no LifeCycle row at either level, continue.
 
-        // (b) _eolmap → _eolcache mirror of endoflife.date.
-        $map = EolMap::forOs($osId);
+        // (b) existing _eolmap (exact pair, or the (os,0) "version unknown" fallback).
+        $map = EolMap::forOsVersion($osId, $verId);
         if ($map !== null) {
-            $cached = EolCache::get($map['eol_product'], $map['eol_cycle']);
-            if ($cached !== null && $cached['eol_date'] !== null) {
-                return [$cached['eol_date'], 'endoflife.date'];
-            }
-            // Cache row missing / eol_date null → treat as a gap; do NOT fetch
-            // synchronously. EolCacheRefresh fills it. Fall to (d).
+            return ['kind' => 'mapped', 'product' => $map['eol_product'], 'cycle' => $map['eol_cycle']];
         }
 
-        // (c) CONTROLLER RULING: auto-match via api/all.json is DEFERRED for v1.
+        // (c) seed-CSV match (spec §15 Q2 — auto-write _eolmap, resolve this run).
+        $match = EolMatch::resolve($osName, $verName);
+        if ($match !== null && isset($match['skip'])) {
+            $run->bump('skipped');
+            $run->bump('scanned');
+            return null;
+        }
+        if ($match !== null) {
+            EolMap::putAuto($osId, $verId, $match['product'], $match['cycle']);
+            return ['kind' => 'mapped', 'product' => $match['product'], 'cycle' => $match['cycle']];
+        }
 
         // (d) nothing resolved.
-        Reconcile::note('eol', 'OperatingSystem', $osId, 'no_mapping', $osName);
-        return [null, ''];
+        Reconcile::note('eol', 'OperatingSystem', $osId, $verId, 'no_mapping', trim("$osName $verName"));
+        $seen[] = "OperatingSystem:$osId:$verId:no_mapping";
+        $run->bump('scanned');
+        return null;
     }
 
     /**
      * Hardware-warranty EOL pass. One Finding per Computer whose
      * `warranty_date + warranty_duration months` falls inside the hardware
-     * horizon.
+     * horizon. UNCHANGED from v1.0.1 (spec §14 — out of scope for v1.1.0).
      *
      * Warranty data lives in `glpi_infocoms` (Infocom / "Financial and
      * administrative information"), keyed by `itemtype` + `items_id` — NOT on
-     * `glpi_computers` in GLPI 11. Guarded so an unexpected schema degrades to a
-     * no-op instead of a fatal.
+     * `glpi_computers` in GLPI 11. Guarded so an unexpected schema degrades to
+     * a no-op instead of a fatal.
      *
      * @param int $hwHorizonDays  hoisted `eol_hardware_horizon_days` (I7)
      * @param int $catId          hoisted Obsolescence category id (I7)
@@ -268,6 +367,8 @@ final class EolScan
 
     /**
      * Re-fetch endoflife.date rows whose local mirror is missing or stale.
+     * UNCHANGED from v1.0.x — kept for the weekly `EolCacheRefresh` cron, which
+     * sweeps everything already in `_eolmap` regardless of this run's needs.
      * Network / shape failures bump `errors` and are skipped — never fatal.
      */
     public static function refreshCache(RunLog $run): void
@@ -301,49 +402,62 @@ final class EolScan
     }
 
     // ---------------------------------------------------------------------
-    // VM-only selfChecks (db/ prefix) — spec §9.2 EOL-1..EOL-5.
+    // VM-only selfChecks (db/ prefix) — spec §9.2 / §11.2 EOL-1..5 plus the
+    // new v1.1.0 pair-grain checks.
     // ---------------------------------------------------------------------
 
     /**
-     * Seed a throwaway OperatingSystem + Computer + link, and (optionally) an
-     * endoflife.date mapping+cache row with the given EOL date.
+     * Seed a throwaway OperatingSystem (+ optional OperatingSystemVersion, if
+     * $verName is non-empty) and a Computer linking them, and (optionally) an
+     * endoflife.date mapping+cache row with the given EOL date at that exact
+     * (os,ver) pair.
      *
-     * Core rows are created with `->add()` and the generated ids captured/returned
-     * (no hardcoded ~2.1e9 ids — those permanently bump InnoDB AUTO_INCREMENT).
+     * Core rows are created with `->add()` and the generated ids
+     * captured/returned (no hardcoded ~2.1e9 ids — those permanently bump
+     * InnoDB AUTO_INCREMENT).
      *
-     * @return array{osId:int,cid:int}
+     * @return array{osId:int,verId:int,cid:int}
      */
-    private static function scSeed(?string $eolDate): array
+    private static function scSeed(?string $eolDate, string $osName = '__sac_sc_os__', string $verName = ''): array
     {
         global $DB;
 
-        $osId = (int) (new \OperatingSystem())->add(['name' => '__sac_sc_os__']);
-        $cid  = (int) (new \Computer())->add([
+        $osId  = (int) (new \OperatingSystem())->add(['name' => $osName]);
+        $verId = $verName === ''
+            ? 0
+            : (int) (new \OperatingSystemVersion())->add(['name' => $verName, 'operatingsystems_id' => $osId]);
+        $cid   = (int) (new \Computer())->add([
             'name'        => '__sac_sc_pc__',
             'entities_id' => 0,
         ]);
         $DB->insert('glpi_items_operatingsystems', [
-            'items_id'            => $cid,
-            'itemtype'            => 'Computer',
-            'operatingsystems_id' => $osId,
+            'items_id'                   => $cid,
+            'itemtype'                   => 'Computer',
+            'operatingsystems_id'        => $osId,
+            'operatingsystemversions_id' => $verId,
         ]);
         if ($eolDate !== null) {
-            EolMap::putConfirmed($osId, self::SC_PRODUCT, '1', 1);
+            EolMap::putConfirmed($osId, $verId, self::SC_PRODUCT, '1', 1);
             EolCache::upsert(self::SC_PRODUCT, '1', ['eol_date' => $eolDate, 'raw_json' => '{}']);
         }
 
-        return ['osId' => $osId, 'cid' => $cid];
+        return ['osId' => $osId, 'verId' => $verId, 'cid' => $cid];
     }
 
-    /** Seed a real `fields` LifeCycle row for one OS. Requires LifeCycleReader::available(). */
-    private static function scSeedLifecycle(int $osId, string $rawDate): void
+    /**
+     * Seed a real `fields` LifeCycle row at one level ('os' keyed by $osId, or
+     * 'version' keyed by $targetId). Requires LifeCycleReader::available()
+     * (checked by the caller).
+     */
+    private static function scSeedLifecycle(int $osId, string $rawDate, string $level = 'os', int $targetId = 0): void
     {
         global $DB;
-        $table = LifeCycleReader::tableName();
-        $col   = LifeCycleReader::dateColumnName();
-        $row   = ['items_id' => $osId, $col => $rawDate];
+        $id    = $level === 'version' ? $targetId : $osId;
+        $table = LifeCycleReader::tableName($level);
+        $col   = LifeCycleReader::dateColumnName($level);
+        $row   = ['items_id' => $id, $col => $rawDate];
         if ($DB->fieldExists($table, 'itemtype')) {
-            $row['itemtype'] = 'OperatingSystem';
+            $row['itemtype'] = $level === 'version' ? 'OperatingSystemVersion' : 'OperatingSystem';
         }
         if ($DB->fieldExists($table, 'entities_id')) {
             $row['entities_id'] = 0;
@@ -363,8 +477,10 @@ final class EolScan
      * Tear every seeded row for a selfCheck back down. Safe to call twice.
      * Also deletes any `glpi_plugin_sac_run` rows this check's RunLog::begin('eol')
      * calls created (id > $sinceRunId) so selfCheck runs never pollute audit history.
+     *
+     * @param array<int,int> $verIds OperatingSystemVersion ids to remove, if any
      */
-    private static function scTeardown(array $osIds, array $cids, array $codes, int $sinceRunId = 0): void
+    private static function scTeardown(array $osIds, array $cids, array $codes, int $sinceRunId = 0, array $verIds = []): void
     {
         global $DB;
 
@@ -383,7 +499,8 @@ final class EolScan
             }
         }
 
-        $lcTable = \Plugin::isPluginActive('fields') ? LifeCycleReader::tableName() : '';
+        $osLcTable  = \Plugin::isPluginActive('fields') ? LifeCycleReader::tableName('os') : '';
+        $verLcTable = \Plugin::isPluginActive('fields') ? LifeCycleReader::tableName('version') : '';
 
         foreach ($osIds as $osId) {
             $osId = (int) $osId;
@@ -394,8 +511,18 @@ final class EolScan
             $DB->delete('glpi_items_operatingsystems', ['operatingsystems_id' => $osId]);
             $DB->delete('glpi_operatingsystems', ['id' => $osId]);
             $DB->delete('glpi_plugin_sac_reconcile', ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId]);
-            if ($lcTable !== '' && $DB->fieldExists($lcTable, 'items_id')) {
-                $DB->delete($lcTable, ['items_id' => $osId]);
+            if ($osLcTable !== '' && $DB->fieldExists($osLcTable, 'items_id')) {
+                $DB->delete($osLcTable, ['items_id' => $osId]);
+            }
+        }
+        foreach ($verIds as $verId) {
+            $verId = (int) $verId;
+            if ($verId <= 0) {
+                continue;
+            }
+            $DB->delete('glpi_operatingsystemversions', ['id' => $verId]);
+            if ($verLcTable !== '' && $DB->fieldExists($verLcTable, 'items_id')) {
+                $DB->delete($verLcTable, ['items_id' => $verId]);
             }
         }
         $DB->delete('glpi_plugin_sac_eolcache', ['eol_product' => self::SC_PRODUCT]);
@@ -412,20 +539,19 @@ final class EolScan
         $yesterday = date('Y-m-d', strtotime('-1 day'));
 
         return [
-            // EOL-1 — LifeCycle path ONLY. Seeds a real `fields` LifeCycle row
-            // (no _eolmap/_eolcache) and asserts the Finding names the lifecycle
-            // source. Skips with a logged note when `fields` LifeCycle is absent
-            // on this VM (the VM checklist already flags confirming that table).
+            // EOL-1 — LifeCycle path ONLY, ver_id=0. Seeds a real `fields`
+            // OS-level LifeCycle row (no _eolmap/_eolcache) and asserts the
+            // Finding names the lifecycle source.
             'db/eol-1-lifecycle-source' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 LifeCycleReader::resetProbeCache();
-                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
-                    echo "SKIP  db/eol-1-lifecycle-source — fields LifeCycle table/column not present on this VM\n";
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName('os') === '') {
+                    echo "SKIP  db/eol-1-lifecycle-source — fields LifeCycle (os level) table/column not present on this VM\n";
                     return;
                 }
-                $seed = self::scSeed(null); // no endoflife.date mapping
+                $seed = self::scSeed(null);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::scSeedLifecycle($osId, $yesterday);
@@ -453,20 +579,19 @@ final class EolScan
                 }
             },
 
-            // EOL-lifecycle-wins — LifeCycle date beats a differing endoflife.date
-            // mirror for the same OS.
+            // LifeCycle (os-level) beats a differing endoflife.date mirror.
             'db/eol-lifecycle-wins' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 LifeCycleReader::resetProbeCache();
-                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
-                    echo "SKIP  db/eol-lifecycle-wins — fields LifeCycle table/column not present on this VM\n";
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName('os') === '') {
+                    echo "SKIP  db/eol-lifecycle-wins — fields LifeCycle (os level) table/column not present on this VM\n";
                     return;
                 }
                 // endoflife.date mirror says +200 days (would be Low); LifeCycle
                 // says yesterday (Critical).
                 $seed = self::scSeed(date('Y-m-d', strtotime('+200 days')));
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::scSeedLifecycle($osId, $yesterday);
@@ -484,19 +609,52 @@ final class EolScan
                 }
             },
 
-            // EOL-bad-date — a LifeCycle row with 0000-00-00 yields no Finding and
-            // one bad_date reconcile row.
+            // NEW v1.1.0 — a version-level LifeCycle date beats a differing
+            // OS-level one for the same pair.
+            'db/eol-version-lifecycle-wins' => static function () use ($yesterday): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                LifeCycleReader::resetProbeCache();
+                $hasOs      = LifeCycleReader::available() && LifeCycleReader::dateColumnName('os') !== '';
+                $hasVersion = LifeCycleReader::dateColumnName('version') !== '';
+                if (!$hasOs || !$hasVersion) {
+                    echo "SKIP  db/eol-version-lifecycle-wins — fields LifeCycle not present at both levels on this VM\n";
+                    return;
+                }
+                $seed    = self::scSeed(null, '__sac_sc_os__', '__sac_sc_ver__');
+                $osId    = $seed['osId']; $verId = $seed['verId']; $cid = $seed['cid'];
+                $code    = Code::eolOs($osId, $verId);
+                $startId = self::scRunFloor();
+                try {
+                    // OS-level says +200d (would be Low); version-level says yesterday (Critical).
+                    self::scSeedLifecycle($osId, date('Y-m-d', strtotime('+200 days')), 'os');
+                    self::scSeedLifecycle($osId, $yesterday, 'version', $verId);
+                    self::run(RunLog::begin('eol'));
+
+                    $f    = new \GlpiPlugin\Riskregister\Finding();
+                    $rows = $f->find(['code' => $code]);
+                    sac_assert_eq(count($rows), 1, 'eol-version-lifecycle-wins: one Finding');
+                    $row = $rows[array_key_first($rows)];
+                    sac_assert(str_contains((string) $row['content'], 'source: lifecycle'), 'lifecycle source wins');
+                    sac_assert(str_contains((string) $row['content'], $yesterday), 'version-level date used, not the OS-level date');
+                    sac_assert_eq($row['severity'], 'Critical', 'graded on the version-level (past) date');
+                } finally {
+                    self::scTeardown([$osId], [$cid], [$code], $startId, [$verId]);
+                }
+            },
+
+            // A LifeCycle row with 0000-00-00 yields no Finding and one
+            // bad_date reconcile row.
             'db/eol-bad-date' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 LifeCycleReader::resetProbeCache();
-                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName() === '') {
-                    echo "SKIP  db/eol-bad-date — fields LifeCycle table/column not present on this VM\n";
+                if (!LifeCycleReader::available() || LifeCycleReader::dateColumnName('os') === '') {
+                    echo "SKIP  db/eol-bad-date — fields LifeCycle (os level) table/column not present on this VM\n";
                     return;
                 }
                 global $DB;
                 $seed = self::scSeed(null);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::scSeedLifecycle($osId, '0000-00-00');
@@ -511,6 +669,7 @@ final class EolScan
                             'signal_type'  => 'eol',
                             'ref_itemtype' => 'OperatingSystem',
                             'ref_id'       => $osId,
+                            'ref_subid'    => 0,
                             'reason'       => 'bad_date',
                         ],
                     ])->current();
@@ -520,13 +679,13 @@ final class EolScan
                 }
             },
 
-            // EOL-2 — re-run after the endoflife.date date moves in-horizon → same
+            // Re-run after the endoflife.date date moves in-horizon -> same
             // row, re-graded in place.
             'db/eol-2-update-in-place' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 $seed = self::scSeed($yesterday);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::run(RunLog::begin('eol'));
@@ -546,13 +705,14 @@ final class EolScan
                 }
             },
 
-            // EOL-3 — no LifeCycle, no _eolmap → no Finding, one no_mapping reconcile.
+            // No LifeCycle, no _eolmap, name doesn't match the seed CSV ->
+            // no Finding, one no_mapping reconcile.
             'db/eol-3-no-mapping-reconcile' => static function (): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 global $DB;
-                $seed = self::scSeed(null); // no mapping
+                $seed = self::scSeed(null);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::run(RunLog::begin('eol'));
@@ -566,6 +726,7 @@ final class EolScan
                             'signal_type'  => 'eol',
                             'ref_itemtype' => 'OperatingSystem',
                             'ref_id'       => $osId,
+                            'ref_subid'    => 0,
                             'reason'       => 'no_mapping',
                         ],
                     ])->current();
@@ -575,13 +736,13 @@ final class EolScan
                 }
             },
 
-            // EOL-4 — a Finding that drops beyond the horizon gains a cleared note.
+            // A Finding that drops beyond the horizon gains a cleared note.
             'db/eol-4-signal-cleared' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 global $DB;
                 $seed = self::scSeed($yesterday);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::run(RunLog::begin('eol'));
@@ -613,13 +774,13 @@ final class EolScan
                 }
             },
 
-            // EOL-5 — endoflife.date-only path (no LifeCycle row) is reported as
-            // the source in `content`.
+            // endoflife.date-only path (no LifeCycle row) is reported as the
+            // source in `content`.
             'db/eol-5-endoflife-source' => static function () use ($yesterday): void {
                 if (!FindingWriter::isAvailable()) { return; }
                 $seed = self::scSeed($yesterday);
                 $osId = $seed['osId']; $cid = $seed['cid'];
-                $code = Code::eolOs($osId);
+                $code = Code::eolOs($osId, 0);
                 $startId = self::scRunFloor();
                 try {
                     self::run(RunLog::begin('eol'));
@@ -631,6 +792,107 @@ final class EolScan
                     sac_assert(str_contains((string) $row['content'], 'source: endoflife.date'), 'EOL-5: content names the endoflife.date source');
                 } finally {
                     self::scTeardown([$osId], [$cid], [$code], $startId);
+                }
+            },
+
+            // NEW v1.1.0 — a fresh seed-CSV match auto-writes _eolmap AND
+            // emits the Finding in the SAME run (spec §15 Q2).
+            'db/eol-seed-automap' => static function (): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                global $DB;
+                $seed    = self::scSeed(null, 'Ubuntu', '22.04.3 LTS'); // no _eolmap — must come from the seed CSV
+                $osId    = $seed['osId']; $verId = $seed['verId']; $cid = $seed['cid'];
+                $code    = Code::eolOs($osId, $verId);
+                $startId = self::scRunFloor();
+                try {
+                    // Pre-warm the cache so this check needs no network stub —
+                    // it is testing the auto-map + same-run-emit behaviour, not
+                    // EolCache::ensureFresh() (that has its own check, Task 9).
+                    EolCache::upsert('ubuntu', '22.04', [
+                        'eol_date' => date('Y-m-d', strtotime('-1 day')),
+                        'raw_json' => '{}',
+                    ]);
+
+                    self::run(RunLog::begin('eol'));
+
+                    $map = EolMap::forOsVersion($osId, $verId);
+                    sac_assert($map !== null, 'a seed-CSV match auto-writes _eolmap');
+                    sac_assert_eq($map['eol_product'], 'ubuntu', 'auto-mapped to the ubuntu product');
+                    sac_assert_eq($map['eol_cycle'], '22.04', 'auto-mapped to the 22.04 cycle');
+                    sac_assert_eq($map['confidence'], 'auto', 'auto-mapped rows are confidence=auto');
+
+                    $f    = new \GlpiPlugin\Riskregister\Finding();
+                    $rows = $f->find(['code' => $code]);
+                    sac_assert_eq(count($rows), 1, 'the Finding is emitted the SAME run as the auto-mapping');
+                } finally {
+                    self::scTeardown([$osId], [$cid], [$code], $startId, [$verId]);
+                    $DB->delete('glpi_plugin_sac_eolcache', ['eol_product' => 'ubuntu', 'eol_cycle' => '22.04']);
+                }
+            },
+
+            // NEW v1.1.0 — a _skip seed pattern never produces a Finding or a
+            // Reconcile row, and bumps the `skipped` counter.
+            'db/eol-skip-non-os' => static function (): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                global $DB;
+                $seed    = self::scSeed(null, 'Kubernetes', '1.29');
+                $osId    = $seed['osId']; $verId = $seed['verId']; $cid = $seed['cid'];
+                $code    = Code::eolOs($osId, $verId);
+                $startId = self::scRunFloor();
+                try {
+                    $run = RunLog::begin('eol');
+                    self::run($run);
+                    $run->finish('ok');
+
+                    $f = new \GlpiPlugin\Riskregister\Finding();
+                    sac_assert_eq(count($f->find(['code' => $code])), 0, 'a _skip pattern never produces a Finding');
+
+                    $rc = $DB->request([
+                        'FROM'  => 'glpi_plugin_sac_reconcile',
+                        'WHERE' => ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId, 'ref_subid' => $verId],
+                    ])->current();
+                    sac_assert($rc === null, 'a _skip pattern never produces a Reconcile row either');
+
+                    $runRow = $DB->request(['FROM' => 'glpi_plugin_sac_run', 'WHERE' => ['id' => $run->id()]])->current();
+                    $counts = json_decode((string) $runRow['counts_json'], true);
+                    sac_assert((int) ($counts['skipped'] ?? 0) >= 1, 'the skipped counter is bumped');
+                } finally {
+                    self::scTeardown([$osId], [$cid], [$code], $startId, [$verId]);
+                }
+            },
+
+            // NEW v1.1.0 — two versions of the same OS get distinct Reconcile
+            // rows, no UNIQUE-key collision.
+            'db/eol-two-versions-distinct' => static function (): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                global $DB;
+                $osId = (int) (new \OperatingSystem())->add(['name' => '__sac_sc_multi__']);
+                $ver1 = (int) (new \OperatingSystemVersion())->add(['name' => '7.9', 'operatingsystems_id' => $osId]);
+                $ver2 = (int) (new \OperatingSystemVersion())->add(['name' => '9.7', 'operatingsystems_id' => $osId]);
+                $cid1 = (int) (new \Computer())->add(['name' => '__sac_sc_multi_a__', 'entities_id' => 0]);
+                $cid2 = (int) (new \Computer())->add(['name' => '__sac_sc_multi_b__', 'entities_id' => 0]);
+                $DB->insert('glpi_items_operatingsystems', [
+                    'items_id' => $cid1, 'itemtype' => 'Computer',
+                    'operatingsystems_id' => $osId, 'operatingsystemversions_id' => $ver1,
+                ]);
+                $DB->insert('glpi_items_operatingsystems', [
+                    'items_id' => $cid2, 'itemtype' => 'Computer',
+                    'operatingsystems_id' => $osId, 'operatingsystemversions_id' => $ver2,
+                ]);
+                $startId = self::scRunFloor();
+                try {
+                    self::run(RunLog::begin('eol'));
+
+                    $rc1 = $DB->request(['FROM' => 'glpi_plugin_sac_reconcile', 'WHERE' => [
+                        'ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId, 'ref_subid' => $ver1, 'reason' => 'no_mapping',
+                    ]])->current();
+                    $rc2 = $DB->request(['FROM' => 'glpi_plugin_sac_reconcile', 'WHERE' => [
+                        'ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId, 'ref_subid' => $ver2, 'reason' => 'no_mapping',
+                    ]])->current();
+                    sac_assert($rc1 !== null, 'version 7.9 gets its own no_mapping row');
+                    sac_assert($rc2 !== null, 'version 9.7 gets its own no_mapping row — no UNIQUE-key collision with 7.9');
+                } finally {
+                    self::scTeardown([$osId], [$cid1, $cid2], [], $startId, [$ver1, $ver2]);
                 }
             },
         ];
