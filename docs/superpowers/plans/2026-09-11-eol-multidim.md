@@ -1581,7 +1581,7 @@ final class Migration
               `date_lastseen` timestamp NULL DEFAULT NULL,
               `is_resolved` tinyint(1) NOT NULL DEFAULT 0,
               PRIMARY KEY (`id`),
-              UNIQUE KEY `signal` (`signal_type`,`ref_itemtype`,`ref_id`,`ref_subid`,`reason`)
+              UNIQUE KEY `signal_sub` (`signal_type`,`ref_itemtype`,`ref_id`,`ref_subid`,`reason`)
             ) $table_options";
 
         self::$tables['glpi_plugin_sac_run'] = "
@@ -1633,7 +1633,13 @@ final class Migration
     /**
      * v1.0.x -> v1.1.0: add `ref_subid` to `_reconcile` and widen its UNIQUE
      * so two versions of the same OS no longer collide. Same idempotent
-     * pattern as above.
+     * pattern as above — and, like `os` -> `os_ver`, the widened key gets a
+     * NEW name (`signal_sub`, not `signal`). Reusing the old name would make
+     * the add-guard `!$DB->indexExists($t, 'signal')` read a name whose drop
+     * was only just QUEUED (not yet flushed by `\Migration`), so it would
+     * still see the old key as present and skip re-adding it — the table
+     * would end up with no unique constraint on this column set at all.
+     * Different names sidestep that ordering hazard entirely.
      */
     private static function migrateReconcileSubId(\Migration $m, \DBmysql $DB): void
     {
@@ -1653,8 +1659,8 @@ final class Migration
         if ($DB->indexExists($t, 'signal')) {
             $m->dropKey($t, 'signal');
         }
-        if (!$DB->indexExists($t, 'signal')) {
-            $m->addKey($t, ['signal_type', 'ref_itemtype', 'ref_id', 'ref_subid', 'reason'], 'signal', 'UNIQUE');
+        if (!$DB->indexExists($t, 'signal_sub')) {
+            $m->addKey($t, ['signal_type', 'ref_itemtype', 'ref_id', 'ref_subid', 'reason'], 'signal_sub', 'UNIQUE');
         }
     }
 
