@@ -131,9 +131,8 @@ final class Migration
      * DDL default), so `(os_id, 0)` is still unique — the key swap cannot
      * collide.
      */
-    private static function migrateEolmapVersionKey(\Migration $m, \DBmysql $DB): void
+    private static function migrateEolmapVersionKey(\Migration $m, \DBmysql $DB, string $t = 'glpi_plugin_sac_eolmap'): void
     {
-        $t = 'glpi_plugin_sac_eolmap';
         if (!$DB->tableExists($t)) {
             return;
         }
@@ -246,5 +245,46 @@ final class Migration
             return;
         }
         $DB->delete('glpi_plugin_sac_eolmap', ['confidence' => 'auto']);
+    }
+
+    /** @return array<string,callable():void> VM-only — exercises the real \Migration + $DB. */
+    public static function selfChecks(): array
+    {
+        return [
+            'db/migration-eolmap-key' => static function (): void {
+                global $DB;
+                $t = 'glpi_plugin_sac_test_eolmap_migration';
+                try {
+                    $DB->doQuery("DROP TABLE IF EXISTS `$t`");
+                    $DB->doQuery("
+                        CREATE TABLE `$t` (
+                          `id` int unsigned NOT NULL AUTO_INCREMENT,
+                          `operatingsystems_id` int unsigned NOT NULL DEFAULT 0,
+                          `eol_product` varchar(100) NOT NULL DEFAULT '',
+                          `eol_cycle` varchar(50) NOT NULL DEFAULT '',
+                          `confidence` varchar(20) NOT NULL DEFAULT 'auto',
+                          `users_id_confirmed` int unsigned DEFAULT NULL,
+                          `date_confirmed` timestamp NULL DEFAULT NULL,
+                          `date_creation` timestamp NULL DEFAULT NULL,
+                          `date_mod` timestamp NULL DEFAULT NULL,
+                          PRIMARY KEY (`id`),
+                          UNIQUE KEY `os` (`operatingsystems_id`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                    sac_assert(!$DB->fieldExists($t, 'operatingsystemversions_id'), 'fixture starts without the version column');
+                    sac_assert($DB->indexExists($t, 'os'), 'fixture starts with the old os key');
+
+                    $migration = new \Migration('9.9.9');
+                    self::migrateEolmapVersionKey($migration, $DB, $t);
+                    $migration->executeMigration();
+
+                    sac_assert($DB->fieldExists($t, 'operatingsystemversions_id'), 'operatingsystemversions_id added by the migration');
+                    sac_assert($DB->indexExists($t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
+                    sac_assert(!$DB->indexExists($t, 'os'), 'old os key dropped by the migration');
+                } finally {
+                    $DB->doQuery("DROP TABLE IF EXISTS `$t`");
+                }
+            },
+        ];
     }
 }

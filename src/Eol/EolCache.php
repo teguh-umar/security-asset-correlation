@@ -204,6 +204,7 @@ final class EolCache
             'db/eolcache-ensurefresh' => static function (): void {
                 global $DB;
                 $product = '__sac_ensurefresh__';
+                $runFloor = (int) ($DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current()['m'] ?? 0);
                 \GlpiPlugin\Sac\Http::$transport = static function (string $url, int $timeout): ?string {
                     return json_encode([
                         ['cycle' => '1', 'eol' => '2020-01-01', 'support' => '2019-01-01', 'lts' => false],
@@ -224,6 +225,7 @@ final class EolCache
                 } finally {
                     \GlpiPlugin\Sac\Http::$transport = null;
                     $DB->delete(self::TABLE, ['eol_product' => $product]);
+                    $DB->delete('glpi_plugin_sac_run', ['module' => 'eol', 'id' => ['>', $runFloor]]);
                 }
             },
         ];

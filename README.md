@@ -86,7 +86,7 @@ Its job ends at a well-formed `Finding`.
 - **Run audit + stale-run recovery** — each scan opens a `_run` row with per-signal counters; orphaned "running" rows are swept to "stale".
 - **Generic Reconcile queue** (`signal_type` + polymorphic `ref_*`) — reused across modules.
 - **Failure-tolerant** — network errors, missing `fields` plugin, riskregister absent, malformed data: all logged and skipped, never abort a run.
-- **Two test harnesses** — `tools/offline-selfcheck.php` (16 dependency-free checks, CI-able) and `tools/selfcheck.php` (VM runner that seeds / asserts / tears down against a live GLPI). Both are CLI-only (refuse a web SAPI).
+- **Two test harnesses** — `tools/offline-selfcheck.php` (15 dependency-free checks, CI-able) and `tools/selfcheck.php` (VM runner that seeds / asserts / tears down against a live GLPI). Both are CLI-only (refuse a web SAPI).
 - Only GLPI core form helpers — no hand-rolled HTML; survives GLPI's Twig migration.
 
 ---
@@ -147,25 +147,46 @@ Assessment → Setup**, or via the `Config` API. Defaults are seeded on install.
 
 ## How Module 1 works (EOL/EOS)
 
-`cronEolScan` runs weekly. It walks every `OperatingSystem` linked to at least one
-Computer (the enumeration itself does not filter `is_deleted`/`is_template`; the
-per-OS `hostCount === 0` branch clears the Finding when every carrying Computer is
-trashed or a template) and resolves an end-of-life date, first hit wins: (a) the
-operator-entered `fields` "LifeCycle" date, then (b) a confirmed/auto
-`_eolmap → _eolcache` mirror of `endoflife.date`. If neither resolves it writes a
-`no_mapping` row to the Reconcile queue and emits no Finding. A resolved date is
-graded against `eol_horizon_days` / the two severity thresholds and one `Finding`
-(`code = SAC-EOL-OS-<id>`, category `Obsolescence`) is upserted through
-`FindingWriter`, with a `Finding_Item` per affected Computer. A second pass, gated
-on `eol_hardware_enabled`, does the same per Computer for
-`warranty_date + warranty_duration months`. When a signal drops beyond the horizon
-or the OS leaves inventory, SAC appends a dated "Signal cleared" line to the
-existing Finding and stops re-asserting — it never auto-closes.
-`cronEolCacheRefresh` re-fetches stale `endoflife.date` rows.
+`cronEolScan` runs weekly, two-pass. Pass 1 walks every distinct
+`(operatingsystems_id, operatingsystemversions_id)` pair linked to at least one
+Computer (GLPI 11 splits an OS across dropdown dimensions — the OS id alone is
+not a valid EOL key) and resolves each pair's end-of-life date, first hit wins:
+(a) the operator-entered `fields` "LifeCycle" date — checked at the
+OS-Version level first, then the OS level, the more specific wins; (b) an
+existing `_eolmap` mapping (an admin-confirmed row, or the `(os_id, 0)`
+"version unknown" fallback); (c) a fresh match against the shipped seed
+`install/data/eol_products.csv` (`EolMatch::resolve()`), which auto-writes
+`_eolmap` (`confidence = 'auto'`) on the spot. If nothing resolves, or a
+seed-matched pattern is a non-OS `_skip` entry (e.g. an appliance's
+Kubernetes version), it writes a `no_mapping` row to the Reconcile queue (or
+is silently counted as `skipped`) and emits no Finding. Between the two
+passes, `EolCache::ensureFresh()` fetches `endoflife.date` for any newly
+mapped product still missing from the local cache, so a fresh seed match
+still has a dated Finding to emit in Pass 2, the SAME run. A resolved date is
+graded against `eol_horizon_days` / the two severity thresholds and one
+`Finding` (`code = SAC-EOL-OS-<os_id>-<ver_id>`, category `Obsolescence`) is
+upserted through `FindingWriter`, with a `Finding_Item` per affected
+Computer. A mapped pair whose cache entry isn't fetched yet bumps a
+`cache_pending` counter and is retried next run — self-healing, not
+surfaced as a problem. A second, unchanged pass, gated on
+`eol_hardware_enabled`, does the same per Computer for
+`warranty_date + warranty_duration months`. When a signal drops beyond the
+horizon or the pair leaves inventory, SAC appends a dated "Signal cleared"
+line to the existing Finding and stops re-asserting — it never auto-closes.
+`cronEolCacheRefresh` re-fetches stale `endoflife.date` rows for everything
+already in `_eolmap`.
 
-**Not in v1.0.0:** auto-discovery of `endoflife.date` product mappings (the
-`api/all.json` fuzzy-match path). Until then an OS with no LifeCycle date and no
-`_eolmap` row lands in the Reconcile queue for an admin to map once.
+**Upgrading from a pre-v1.1.0 install:** old `SAC-EOL-OS-<id>` Findings (the
+single-int code) are closed with a superseded content note — never deleted,
+since a promoted riskregister Risk can hold a FK to the Finding. Old
+`_reconcile` `eol` rows are cleared (SAC owns that table; the next scan
+regenerates them at the new grain); `_eolmap` `auto` rows are purged
+(`confirmed` rows are kept as an `(os_id, 0)` fallback). See VM verification
+checklist item 11 below.
+
+**Not yet built:** full-catalog auto-discovery against `endoflife.date`'s
+`api/all.json` (the seed CSV covers the common distros/platforms; anything
+else lands in Reconcile for a one-time admin mapping).
 
 ## How Module 2 works (License Governance)
 
@@ -207,7 +228,7 @@ and integration contracts live in `_pgn-glpi-suite.md` (not in this repo).
 - **Direct in-process API** — `FindingWriter` calls `\GlpiPlugin\Riskregister\Finding`
   (`->find()` → `->add()` / `->update()`) and `\GlpiPlugin\Riskregister\Finding_Item`,
   status-preserving upsert keyed on `(entities_id, code)`. No CSV, no datainjection.
-- **`code`** is stable and deterministic per finding (`SAC-EOL-OS-<id>`,
+- **`code`** is stable and deterministic per finding (`SAC-EOL-OS-<os_id>-<ver_id>`,
   `SAC-EOL-HW-<id>`, `SAC-LIC-MISSING-<manufacturers_id>`, `SAC-LIC-OVER-<softwares_id>`);
   `scope_label` is always non-empty.
 - **Enums**: `severity` ∈ `Critical|High|Medium|Low|Info`,
@@ -290,10 +311,8 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
   `results.xml` pull later. Separate spec.
 - **VM verification pass** — the plugin is code-complete but has never run on real
   GLPI.
-- **Schema-upgrade path** — `hook.php` currently does `tableExists ? skip : create`
-  with no `\Migration` object or schema version, so a v1.1 schema change won't
-  auto-apply on an existing install. Add before the next schema change.
-- Auto-discovery of `endoflife.date` product mappings.
+- Full-catalog auto-discovery against `endoflife.date`'s `api/all.json` (the
+  v1.1.0 seed CSV covers the common distros/platforms only).
 - Windows patch/CIS tracks; hardware-vendor lifecycle source.
 - Browser-based (non-CLI) Finding export.
 
