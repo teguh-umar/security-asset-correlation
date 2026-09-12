@@ -1,7 +1,17 @@
 {#
  # SAC — scan-run history. Read-only; last 50 rows, newest first.
  # Autoescape ON — no |raw on plugin data.
+ # Same count_labels map as overview.html.twig — keep the two in sync.
  #}
+{% set count_labels = {
+    'scanned':          __('Scanned', 'sac'),
+    'findings_upserted':__('Findings written', 'sac'),
+    'findings_cleared': __('Findings cleared', 'sac'),
+    'reconcile_open':   __('Reconcile added', 'sac'),
+    'errors':           __('Errors', 'sac'),
+    'skipped':          __('Skipped (not an OS)', 'sac'),
+    'cache_pending':    __('Awaiting endoflife.date', 'sac')
+} %}
 <div class="card">
     <div class="card-body">
     {% if runs is empty %}
@@ -19,14 +29,22 @@
             </thead>
             <tbody>
             {% for r in runs %}
+            {% set st_cls = r.status == 'ok' ? 'status-green' : (r.status == 'error' ? 'status-red' : 'status-yellow') %}
                 <tr>
                     <td>{{ r.module }}</td>
                     <td>{{ r.date_start }}</td>
                     <td>{{ r.date_end }}</td>
-                    <td>{{ r.status }}</td>
+                    <td>
+                        <span class="status {{ st_cls }}">
+                            <span class="status-dot"></span>{{ r.status == 'ok' ? __('OK', 'sac') : (r.status == 'error' ? __('Error', 'sac') : r.status) }}
+                        </span>
+                    </td>
                     <td>
                     {% for k, v in r.counts %}
-                        <span class="badge bg-secondary me-1">{{ k }}: {{ v }}</span>
+                        <div class="small{{ k == 'errors' and v > 0 ? ' text-danger fw-bold' : '' }}">
+                            <span class="text-muted">{{ count_labels[k]|default(k|replace({'_': ' '})) }}:</span>
+                            <span class="text-body">{{ v }}</span>
+                        </div>
                     {% else %}
                         <span class="text-muted">&mdash;</span>
                     {% endfor %}
