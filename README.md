@@ -29,17 +29,28 @@ Its job ends at a well-formed `Finding`.
 
 ### Module 1 — EOL/EOS
 
-- **Weekly OS EOL scan** (`cronEolScan`) over every `OperatingSystem` carrying a live Computer.
+- **Weekly OS EOL scan** (`cronEolScan`) over every `(OperatingSystem,
+  OperatingSystemVersion)` pair carrying a live Computer — GLPI 11 splits an
+  OS across dropdown dimensions, so the OS name/id alone is not a valid EOL
+  key (v1.1.0).
 - **Layered EOL-date resolution**, first hit wins:
-  1. operator-entered `fields`-plugin "LifeCycle" `EndOfLife` date,
-  2. admin-confirmed `endoflife.date` product/cycle mapping via a local cache,
+  1. operator-entered `fields`-plugin "LifeCycle" `EndOfLife` date — checked
+     at the OS-Version level first, then the OS level (the more specific
+     wins),
+  2. an `endoflife.date` product/cycle mapping — either admin-confirmed via
+     Reconcile, or auto-matched this run against the shipped seed
+     (`install/data/eol_products.csv`),
   3. unresolved → Reconcile queue, no Finding.
-- **`endoflife.date` local cache** (`cronEolCacheRefresh`) — EOL/EOS dates + LTS flag; re-fetch throttled by `eol_cache_max_age_days`.
+- **`endoflife.date` local cache** (`cronEolCacheRefresh` + an inline
+  cache-fill during `cronEolScan` itself) — EOL/EOS dates + LTS flag;
+  re-fetch throttled by `eol_cache_max_age_days`.
 - **Configurable severity ladder** — past-due → `Critical`, ≤90d → `High`, ≤180d → `Medium`, ≤365d → `Low`, beyond horizon → no Finding.
-- **One Finding per OS** (`code = SAC-EOL-OS-<id>`, category `Obsolescence`), a `Finding_Item` per affected Computer, affected hostnames in `content`.
-- **Hardware-warranty EOL pass** (optional) — per-Computer Finding (`SAC-EOL-HW-<id>`) from `warranty_date + warranty_duration`.
-- **Signal-cleared handling** — when EOL moves beyond the horizon or the OS leaves inventory, appends a dated "Signal cleared" note (once per day) and stops re-asserting. **Never auto-closes.**
-- **OS-name → product/cycle matching** — RHEL / Ubuntu / Windows Server / Debian / CentOS / SLES / ESXi, with version-cycle extraction (`8.6`→`8`, `20.04.6`→`20.04`, `2012 R2`→`2012-R2`).
+- **One Finding per (OS, version) pair** (`code = SAC-EOL-OS-<os_id>-<ver_id>`,
+  category `Obsolescence`), a `Finding_Item` per affected Computer, affected
+  hostnames in `content`.
+- **Hardware-warranty EOL pass** (optional) — per-Computer Finding (`SAC-EOL-HW-<id>`) from `warranty_date + warranty_duration`. Unaffected by the v1.1.0 re-keying.
+- **Signal-cleared handling** — when EOL moves beyond the horizon or the pair leaves inventory, appends a dated "Signal cleared" note (once per day) and stops re-asserting. **Never auto-closes.**
+- **Seed-CSV product/cycle matching** — RHEL / Rocky / AlmaLinux / Oracle Linux / CentOS(-Stream) / Ubuntu / Debian / SLES / openSUSE / Amazon Linux / Windows(-Server) / VMware ESXi/vCenter, with version-cycle extraction (`8.6`→`8`, `22.04.3`→`22.04`, `2012 R2`→`2012-R2`). A non-OS name in the OS dropdown (e.g. an appliance's Kubernetes version) is silently skipped, never Reconciled.
 
 ### Module 2 — License Governance
 
@@ -253,11 +264,20 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
    Change a right, save, reload — it must stick.
 10. Confirm `csrf_token()` is available in GLPI 11's Twig environment — the
     `config` and `reconcile` templates call it.
-11. Confirm `glpi_softwares.is_template` and `glpi_items_softwareversions.is_deleted`
+11. **v1.1.0 upgrade only** — after `plugin:install sac --force`, confirm: old
+    `SAC-EOL-OS-<n>` Findings are `Closed` with a
+    "[superseded … re-keyed to (operatingsystems_id, operatingsystemversions_id)]"
+    content note (never deleted); `glpi_plugin_sac_reconcile` has zero
+    `signal_type='eol'` rows immediately after the upgrade (SAC wipes and
+    regenerates them); `glpi_plugin_sac_eolmap` retains only `confidence =
+    'confirmed'` rows (now at `operatingsystemversions_id = 0`). Then run
+    `cronEolScan` once and confirm `_eolmap`/`_reconcile` repopulate at the new
+    `(os,ver)` grain and new Findings carry the two-int `code`.
+12. Confirm `glpi_softwares.is_template` and `glpi_items_softwareversions.is_deleted`
     columns exist (the License candidate query filters on both).
-12. Confirm `DBmysql::quote()` is available in the running build (used by the
+13. Confirm `DBmysql::quote()` is available in the running build (used by the
     License candidate query's category-exclusion list).
-13. Open **Security Assessment → Setup**, save the form once, and confirm
+14. Open **Security Assessment → Setup**, save the form once, and confirm
     `finding_entity` round-trips as an entity id (renders as an `Entity::dropdown`,
     not a checkbox).
 
