@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.2] - 2026-09-13
+
+### Fixed
+
+- **"Scan runs" page (`templates/run.html.twig`) was unreadable** — every
+  count rendered as a dark `badge bg-secondary` pill (the same low-contrast
+  issue Overview had before v1.0.2, but this page never got that fix). Now
+  matches Overview's convention: theme-aware text (`text-muted` label /
+  `text-body` value, no fixed background colour) instead of solid badges, a
+  colour-coded `status`/`status-dot` pill for the Status column, human
+  labels for every counter via the same `count_labels` map Overview uses
+  (now including the v1.1.0 `skipped` / `cache_pending` counters, which this
+  page didn't know about either), and a non-zero `errors` row rendered in
+  red.
+
 ## [1.1.1] - 2026-09-12
 
 First real v1.1.0 upgrade attempt on VM-HQ-GLPI failed with `Attempted to
