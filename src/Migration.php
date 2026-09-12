@@ -123,13 +123,33 @@ final class Migration
     }
 
     /**
+     * Whether a KEY/INDEX named $keyName exists on $table. GLPI's `DB` /
+     * `DBmysql` class has **no** `indexExists()` method — an earlier version
+     * of this file called `$DB->indexExists(...)` and crashed a real VM
+     * upgrade with "Attempted to call an undefined method named indexExists
+     * of class DB". This checks directly via `SHOW KEYS`, which needs no
+     * database/schema name at all — deliberately, since VM-HQ-GLPI's actual
+     * database is named `itsm`, not `glpi` (hub §3/§7 nvd 2.4.1 gotcha:
+     * never hardcode `TABLE_SCHEMA = 'glpi'` in an `INFORMATION_SCHEMA`
+     * query). `$table`/`$keyName` are always one of this file's own hardcoded
+     * literal constants — never external input — so no escaping is needed,
+     * consistent with `$t` already being interpolated raw elsewhere in this
+     * file (e.g. the `DROP TABLE IF EXISTS` calls above).
+     */
+    private static function keyExists(\DBmysql $DB, string $table, string $keyName): bool
+    {
+        $res = $DB->doQuery("SHOW KEYS FROM `$table` WHERE `Key_name` = '$keyName'");
+        return $res !== false && $DB->numrows($res) > 0;
+    }
+
+    /**
      * v1.0.x -> v1.1.0: add the version dimension to `_eolmap` and re-key its
-     * UNIQUE. Idempotent — `fieldExists`/`indexExists` checks ARE the version
-     * gate (spec §5.2), never a version-number comparison. No-op on a fresh
-     * install (the fresh DDL above already has the target shape). Every
-     * pre-migration row gets `operatingsystemversions_id = 0` (the column's
-     * DDL default), so `(os_id, 0)` is still unique — the key swap cannot
-     * collide.
+     * UNIQUE. Idempotent — `fieldExists()` / `keyExists()` checks ARE the
+     * version gate (spec §5.2), never a version-number comparison. No-op on
+     * a fresh install (the fresh DDL above already has the target shape).
+     * Every pre-migration row gets `operatingsystemversions_id = 0` (the
+     * column's DDL default), so `(os_id, 0)` is still unique — the key swap
+     * cannot collide.
      */
     private static function migrateEolmapVersionKey(\Migration $m, \DBmysql $DB, string $t = 'glpi_plugin_sac_eolmap'): void
     {
@@ -145,10 +165,10 @@ final class Migration
         }
         $m->migrationOneTable($t); // flush the column before the key below depends on it
 
-        if ($DB->indexExists($t, 'os')) {
+        if (self::keyExists($DB, $t, 'os')) {
             $m->dropKey($t, 'os');
         }
-        if (!$DB->indexExists($t, 'os_ver')) {
+        if (!self::keyExists($DB, $t, 'os_ver')) {
             $m->addKey($t, ['operatingsystems_id', 'operatingsystemversions_id'], 'os_ver', 'UNIQUE');
         }
     }
@@ -158,11 +178,11 @@ final class Migration
      * so two versions of the same OS no longer collide. Same idempotent
      * pattern as above — and, like `os` -> `os_ver`, the widened key gets a
      * NEW name (`signal_sub`, not `signal`). Reusing the old name would make
-     * the add-guard `!$DB->indexExists($t, 'signal')` read a name whose drop
-     * was only just QUEUED (not yet flushed by `\Migration`), so it would
-     * still see the old key as present and skip re-adding it — the table
-     * would end up with no unique constraint on this column set at all.
-     * Different names sidestep that ordering hazard entirely.
+     * the add-guard `!self::keyExists($DB, $t, 'signal')` read a name whose
+     * drop was only just QUEUED (not yet flushed by `\Migration`), so it
+     * would still see the old key as present and skip re-adding it — the
+     * table would end up with no unique constraint on this column set at
+     * all. Different names sidestep that ordering hazard entirely.
      */
     private static function migrateReconcileSubId(\Migration $m, \DBmysql $DB): void
     {
@@ -179,10 +199,10 @@ final class Migration
         }
         $m->migrationOneTable($t);
 
-        if ($DB->indexExists($t, 'signal')) {
+        if (self::keyExists($DB, $t, 'signal')) {
             $m->dropKey($t, 'signal');
         }
-        if (!$DB->indexExists($t, 'signal_sub')) {
+        if (!self::keyExists($DB, $t, 'signal_sub')) {
             $m->addKey($t, ['signal_type', 'ref_itemtype', 'ref_id', 'ref_subid', 'reason'], 'signal_sub', 'UNIQUE');
         }
     }
@@ -272,15 +292,15 @@ final class Migration
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                     ");
                     sac_assert(!$DB->fieldExists($t, 'operatingsystemversions_id'), 'fixture starts without the version column');
-                    sac_assert($DB->indexExists($t, 'os'), 'fixture starts with the old os key');
+                    sac_assert(self::keyExists($DB, $t, 'os'), 'fixture starts with the old os key');
 
                     $migration = new \Migration('9.9.9');
                     self::migrateEolmapVersionKey($migration, $DB, $t);
                     $migration->executeMigration();
 
                     sac_assert($DB->fieldExists($t, 'operatingsystemversions_id'), 'operatingsystemversions_id added by the migration');
-                    sac_assert($DB->indexExists($t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
-                    sac_assert(!$DB->indexExists($t, 'os'), 'old os key dropped by the migration');
+                    sac_assert(self::keyExists($DB, $t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
+                    sac_assert(!self::keyExists($DB, $t, 'os'), 'old os key dropped by the migration');
                 } finally {
                     $DB->doQuery("DROP TABLE IF EXISTS `$t`");
                 }
