@@ -6,7 +6,9 @@ namespace GlpiPlugin\Sac;
  * Maps an OperatingSystem or Software id to the Computer assets it touches.
  *
  * Read-only: every method is a guarded SELECT, no INSERT/UPDATE/DELETE.
- * Module 1 (EOL) uses {@see computersForOs()}; Module 2 (License) uses
+ * Module 1 (EOL) uses {@see computersForOsVersion()} (the pair-exact grain);
+ * `computersForOs()` is kept for its own selfChecks and any future
+ * whole-OS use case. Module 2 (License) uses
  * {@see computersForSoftware()} / {@see installCount()}.
  *
  * `unresolved` is always empty here — an OS/Software id either resolves to

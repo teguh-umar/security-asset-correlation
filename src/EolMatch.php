@@ -85,7 +85,7 @@ final class EolMatch
         if (!preg_match('/server\s+(\d{4})(\s*r2)?/', $s, $m)) {
             return null;
         }
-        return $m[1] . (isset($m[2]) && trim($m[2]) !== '' ? '-R2' : '');
+        return $m[1] . (isset($m[2]) && trim($m[2]) !== '' ? '-r2' : '');
     }
 
     private static function cycleWindowsClient(string $s): ?string
@@ -104,7 +104,7 @@ final class EolMatch
                 sac_assert_eq(self::cycleFrom('xy', '7.0.3'), '7.0', 'xy: 7.0.3 -> 7.0');
                 sac_assert_eq(self::cycleFrom('xy', '8.0 Update 1'), '8.0', 'xy: 8.0 update 1 -> 8.0');
                 sac_assert_eq(self::cycleFrom('winsrv', 'Microsoft Windows Server 2019 Standard'), '2019', 'winsrv: 2019');
-                sac_assert_eq(self::cycleFrom('winsrv', 'Windows Server 2012 R2'), '2012-R2', 'winsrv: 2012 R2');
+                sac_assert_eq(self::cycleFrom('winsrv', 'Windows Server 2012 R2'), '2012-r2', 'winsrv: 2012 R2 (lowercase r2 matches the live endoflife.date cycle string)');
                 sac_assert_eq(self::cycleFrom('winclient', 'Windows 10 Enterprise'), '10', 'winclient: 10');
                 sac_assert_eq(self::cycleFrom('exact', ' 2024.1 '), '2024.1', 'exact: verbatim, trimmed');
                 sac_assert_eq(self::cycleFrom('major', 'Some Linux'), null, 'major: no digits -> null');

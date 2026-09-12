@@ -5,7 +5,7 @@ namespace GlpiPlugin\Sac;
 /**
  * Reconciliation signals: things a scan expected to find but didn't (missing
  * asset, unmapped OS, dropped install ...). One row per distinct problem in
- * `glpi_plugin_sac_reconcile`, UNIQUE on (signal_type, ref_itemtype, ref_id, reason).
+ * `glpi_plugin_sac_reconcile`, UNIQUE on (signal_type, ref_itemtype, ref_id, ref_subid, reason).
  *
  * Task 6 ships only the write path used by Modules 1 & 2 (note / autoResolveMissing).
  * listForDisplay(), resolve(), resolveEolMapping() and the front page are Task 11.
@@ -28,7 +28,7 @@ class Reconcile extends \CommonDBTM
 
     /**
      * Record (or refresh) a reconciliation signal. Upserts on the UNIQUE key
-     * (signal_type, ref_itemtype, ref_id, reason): bumps date_lastseen + detail
+     * (signal_type, ref_itemtype, ref_id, ref_subid, reason): bumps date_lastseen + detail
      * on every call, and on the very first insert also stamps date_firstseen and
      * sets is_resolved = 0.
      */
@@ -323,29 +323,34 @@ class Reconcile extends \CommonDBTM
 
             'db/reconcile-subid-distinct' => static function (): void {
                 global $DB;
+                // Isolated signal_type -- MUST NEVER be 'eol' or 'license': autoResolveMissing()
+                // sweeps every unresolved row of the signal_type it's given, so using a real
+                // namespace here would silently resolve every genuinely-open reconcile row on
+                // a VM run of this selfCheck.
+                $sig  = '__sac_selftest_subid__';
                 $osId = 2147480997;
                 try {
-                    self::note('eol', 'OperatingSystem', $osId, 100, 'no_mapping', 'v100');
-                    self::note('eol', 'OperatingSystem', $osId, 200, 'no_mapping', 'v200');
+                    self::note($sig, 'OperatingSystem', $osId, 100, 'no_mapping', 'v100');
+                    self::note($sig, 'OperatingSystem', $osId, 200, 'no_mapping', 'v200');
 
                     $cpt = $DB->request([
                         'COUNT' => 'c', 'FROM' => self::TABLE,
-                        'WHERE' => ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId],
+                        'WHERE' => ['signal_type' => $sig, 'ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId],
                     ])->current()['c'];
                     sac_assert_eq((int) $cpt, 2, 'two distinct rows for the same OS, different ref_subid');
 
-                    self::autoResolveMissing('eol', ['OperatingSystem:' . $osId . ':100:no_mapping']);
+                    self::autoResolveMissing($sig, ['OperatingSystem:' . $osId . ':100:no_mapping']);
                     $resolved = [];
                     foreach ($DB->request([
                         'FROM'  => self::TABLE,
-                        'WHERE' => ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId],
+                        'WHERE' => ['signal_type' => $sig, 'ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId],
                     ]) as $r) {
                         $resolved[(int) $r['ref_subid']] = (bool) $r['is_resolved'];
                     }
                     sac_assert_eq($resolved[100], false, 'the still-seen subid stays open');
                     sac_assert_eq($resolved[200], true, 'the no-longer-seen subid auto-resolves');
                 } finally {
-                    $DB->delete(self::TABLE, ['ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId]);
+                    $DB->delete(self::TABLE, ['signal_type' => $sig, 'ref_itemtype' => 'OperatingSystem', 'ref_id' => $osId]);
                 }
             },
         ];

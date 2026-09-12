@@ -8,12 +8,11 @@ centos stream,centos-stream,version,major,
 centos,centos,version,major,
 ubuntu,ubuntu,version,yy.mm,
 debian,debian,version,major,
-suse linux enterprise server,sles,version,major,
-suse linux enterprise,sles,version,major,
-opensuse leap,opensuse,version,yy.mm,
+suse linux enterprise server,sles,version,xy,verified 2026-09-12 against endoflife.date: sles cycles are major.minor (15.6) not bare major
+suse linux enterprise,sles,version,xy,same as above
+opensuse leap,opensuse,version,xy,verified 2026-09-12 against endoflife.date: cycles are major.minor (15.6/16.0) not yy.mm
 amazon linux,amazon-linux,version,major,
 windows server,windows-server,name,winsrv,version dropdown is usually blank
-windows,windows,name,winclient,
 vmware esxi,vmware-esxi,version,xy,
 esxi,vmware-esxi,version,xy,
 vmware vcenter,vmware-vcenter,version,xy,
