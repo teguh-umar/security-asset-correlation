@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.1] - 2026-09-12
+
+First real v1.1.0 upgrade attempt on VM-HQ-GLPI failed with `Attempted to
+call an undefined method named "indexExists" of class "DB"` inside
+`Migration::migrateEolmapVersionKey()`.
+
+### Fixed
+
+- **`src/Migration.php`** — GLPI's `DB`/`DBmysql` class has no `indexExists()`
+  method; both schema-migration helpers (`migrateEolmapVersionKey()`,
+  `migrateReconcileSubId()`) called it directly and crashed the upgrade
+  before any of the v1.1.0 schema/data migration ran. Replaced with a new
+  `Migration::keyExists()` using a direct `SHOW KEYS FROM <table>` query,
+  which needs no database/schema name at all (also sidesteps hardcoding
+  `TABLE_SCHEMA = 'glpi'` — VM-HQ-GLPI's actual database is `itsm`, per the
+  suite-wide `nvd` 2.4.1 gotcha). `Migration::install()` is idempotent, so a
+  VM that hit this crash mid-upgrade (partially migrated: the
+  `operatingsystemversions_id` column may already be present, the key swap
+  and everything after it did not run) just needs `install()` re-run —
+  no manual cleanup required.
+
 ## [1.1.0] - 2026-09-11
 
 GLPI 11 splits an operating system across dropdown dimensions
