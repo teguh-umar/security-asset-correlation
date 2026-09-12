@@ -1,10 +1,14 @@
 # SAC — Project Brief
 
-**Plugin:** Security-Asset Correlation (SAC)
+**Plugin:** Security-Asset Correlation (SAC) — **being renamed to Asset
+Compliance Correlation (ACC)**, scheduled after v1.1.0 is VM-verified (§12).
 **Repo:** `teguh-umar/security-asset-correlation` (private)
 **Session:** `sec-assessmant-korelasi-cve-78` `[5c886d]` (was `-cc`)
-**Status:** Design stage — Modules 1 & 2 design complete, no plugin code yet
-**Last updated:** 2026-09-07
+**Status:** v1.1.0 merged to `main` and pushed (commit `0824247`,
+2026-09-12) — Modules 1 & 2 code-complete through the EOL multidim
+re-keying; **not yet run on VM-HQ-GLPI** (v1.0.x was; the v1.1.0 upgrade
+pass is still pending). Module 3 (Config/Patch Compliance) not started.
+**Last updated:** 2026-09-12
 
 ---
 
@@ -490,15 +494,23 @@ Still open (VM-verification facts, not design):
   `$sheet->toArray(null,true,false,false)`.
 - **integrasipaman → Finding** — high-risk terminal command on a production asset
   as a candidate Finding (owned by the integrasipaman side).
-- **Rename SAC → ACS ("Asset Correlation Security")** — decided 2026-09-11, full
-  internal rename (namespace `GlpiPlugin\Acs\`, tables `glpi_plugin_acs_*`,
-  config `plugin:acs`, rights `plugin_acs_*`, menu sector `acs`, Finding codes
-  `ACS-EOL-…`/`ACS-LIC-…`, `assessment_ref` `ACS/eol`/`ACS/license`, twig
-  namespace `@acs`, plugin folder + repo). **Scheduled as its own plan after
-  v1.1.0 (EOL multidim) is implemented and deployed** — doing it alongside the
-  v1.1.0 re-keying would stack two breaking VM migrations (table rename +
-  Finding-code rename) into one upgrade. Needs its own migration (old
-  `glpi_plugin_sac_*` tables/config/rights → new `acs_*` ones, old `SAC-*`
-  Findings superseded the same way v1.1.0 supersedes old-format codes) and a
-  heads-up to `riskregister` (Finding `code`/`assessment_ref` prefix changes)
-  and `nvd` (their spec note references the `sac` plan path) before it ships.
+- **Rename SAC → ACC ("Asset Compliance Correlation")** — decided 2026-09-11
+  (as "ACS"/"Asset Correlation Security"), **name finalized 2026-09-12 to ACC**
+  ("Asset Compliance Correlation" — better fits the plugin's actual scope:
+  EOL/EOS is lifecycle/support compliance, license governance is license
+  compliance, the planned Module 3 is config/patch compliance; "compliance"
+  is also the one word not already owned by another suite plugin, unlike
+  "security"). Full internal rename: namespace `GlpiPlugin\Acc\`, tables
+  `glpi_plugin_acc_*`, config `plugin:acc`, rights `plugin_acc_*`, menu
+  sector `acc`, Finding codes `ACC-EOL-…`/`ACC-LIC-…`, `assessment_ref`
+  `ACC/eol`/`ACC/license`, twig namespace `@acc`, plugin folder + repo.
+  **Scheduled as its own plan after v1.1.0 is deployed and verified on the
+  VM** — v1.1.0 (EOL multidim) is merged to `main` and pushed
+  (2026-09-12, commit `0824247`) but **not yet run on VM-HQ-GLPI**; doing the
+  rename before that VM pass would stack two breaking migrations (table
+  rename + Finding-code rename) into one upgrade. Needs its own migration
+  (old `glpi_plugin_sac_*` tables/config/rights → new `acc_*` ones, old
+  `SAC-*` Findings superseded the same way v1.1.0 supersedes old-format
+  codes) and a heads-up to `riskregister` (Finding `code`/`assessment_ref`
+  prefix changes) and `nvd` (their spec note references the `sac` plan path)
+  before it ships.
