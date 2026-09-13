@@ -222,11 +222,13 @@ final class Migration
      * `ref_subid` doesn't match the `*_id` naming convention the hub §4
      * audit query (and possibly core's `migration:unsigned_keys`) looks
      * for, so it needs this explicit retrofit regardless of whether the
-     * core command ever gets pointed at it.
+     * core command ever gets pointed at it — which also means it's the
+     * column no name-based audit will ever catch on its own, so it needs
+     * its own direct selfCheck assertion (`db/migration-reconcile-subid-key`),
+     * not just eyeballing.
      */
-    private static function migrateReconcileSubId(\Migration $m, \DBmysql $DB): void
+    private static function migrateReconcileSubId(\Migration $m, \DBmysql $DB, string $t = 'glpi_plugin_sac_reconcile'): void
     {
-        $t = 'glpi_plugin_sac_reconcile';
         if (!$DB->tableExists($t)) {
             return;
         }
@@ -345,6 +347,42 @@ final class Migration
                     sac_assert(self::isUnsignedInt($DB, $t, 'operatingsystemversions_id'), 'operatingsystemversions_id is unsigned (hub §4 rule 2b -- would have caught the addField(\'integer\',...) bug)');
                     sac_assert(self::keyExists($DB, $t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
                     sac_assert(!self::keyExists($DB, $t, 'os'), 'old os key dropped by the migration');
+                } finally {
+                    $DB->doQuery("DROP TABLE IF EXISTS `$t`");
+                }
+            },
+
+            'db/migration-reconcile-subid-key' => static function (): void {
+                global $DB;
+                $t = 'glpi_plugin_sac_test_reconcile_migration';
+                try {
+                    $DB->doQuery("DROP TABLE IF EXISTS `$t`");
+                    $DB->doQuery("
+                        CREATE TABLE `$t` (
+                          `id` int unsigned NOT NULL AUTO_INCREMENT,
+                          `signal_type` varchar(20) NOT NULL DEFAULT '',
+                          `ref_itemtype` varchar(100) NOT NULL DEFAULT '',
+                          `ref_id` int unsigned NOT NULL DEFAULT 0,
+                          `reason` varchar(30) NOT NULL DEFAULT '',
+                          `detail` text,
+                          `date_firstseen` timestamp NULL DEFAULT NULL,
+                          `date_lastseen` timestamp NULL DEFAULT NULL,
+                          `is_resolved` tinyint(1) NOT NULL DEFAULT 0,
+                          PRIMARY KEY (`id`),
+                          UNIQUE KEY `signal` (`signal_type`,`ref_itemtype`,`ref_id`,`reason`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                    sac_assert(!$DB->fieldExists($t, 'ref_subid'), 'fixture starts without ref_subid');
+                    sac_assert(self::keyExists($DB, $t, 'signal'), 'fixture starts with the old signal key');
+
+                    $migration = new \Migration('9.9.9');
+                    self::migrateReconcileSubId($migration, $DB, $t);
+                    $migration->executeMigration();
+
+                    sac_assert($DB->fieldExists($t, 'ref_subid'), 'ref_subid added by the migration');
+                    sac_assert(self::isUnsignedInt($DB, $t, 'ref_subid'), 'ref_subid is unsigned (hub §4 rule 2b -- ref_subid does not match the *_id naming pattern, so no name-based audit will ever catch a regression here)');
+                    sac_assert(self::keyExists($DB, $t, 'signal_sub'), 'signal_sub UNIQUE key added by the migration');
+                    sac_assert(!self::keyExists($DB, $t, 'signal'), 'old signal key dropped by the migration');
                 } finally {
                     $DB->doQuery("DROP TABLE IF EXISTS `$t`");
                 }

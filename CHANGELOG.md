@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.9] - 2026-09-13
+
+### Added
+
+- **`db/migration-reconcile-subid-key` selfCheck** — v1.1.7's unsigned-key
+  fix for `_reconcile.ref_subid` had no direct test coverage (only
+  `_eolmap.operatingsystemversions_id` did). `ref_subid` is specifically the
+  column no name-based audit (the hub §4 query, possibly core's
+  `migration:unsigned_keys`) will ever catch, since it doesn't match the
+  `*_id` naming convention — so it's the one that most needed its own
+  selfCheck guard. `migrateReconcileSubId()` gained the same optional `$t`
+  table-name parameter `migrateEolmapVersionKey()` already had, so this new
+  check can exercise it against a throwaway fixture table the same way.
+
 ## [1.1.8] - 2026-09-13
 
 ### Fixed
