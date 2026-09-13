@@ -143,6 +143,24 @@ final class Migration
     }
 
     /**
+     * Whether $field on $table is an unsigned integer column, via
+     * `$DB->listFields()` (same proven-on-VM pattern `LifeCycleReader`
+     * already uses to read a column's `Type` string).
+     */
+    private static function isUnsignedInt(\DBmysql $DB, string $table, string $field): bool
+    {
+        foreach ($DB->listFields($table) as $name => $meta) {
+            if ((string) $name !== $field) {
+                continue;
+            }
+            $meta = (array) $meta;
+            $type = strtolower((string) ($meta['Type'] ?? $meta['type'] ?? ''));
+            return str_contains($type, 'unsigned');
+        }
+        return false;
+    }
+
+    /**
      * v1.0.x -> v1.1.0: add the version dimension to `_eolmap` and re-key its
      * UNIQUE. Idempotent — `fieldExists()` / `keyExists()` checks ARE the
      * version gate (spec §5.2), never a version-number comparison. No-op on
@@ -150,6 +168,15 @@ final class Migration
      * Every pre-migration row gets `operatingsystemversions_id = 0` (the
      * column's DDL default), so `(os_id, 0)` is still unique — the key swap
      * cannot collide.
+     *
+     * Type keyword is `'fkey'`, NOT `'integer'`/`'int'` — GLPI's
+     * `\Migration::fieldFormat()` only emits `UNSIGNED` for `'fkey'` (and
+     * `'autoincrement'` for a PK); `'integer'` silently produces a signed
+     * `INT` even though every `CREATE TABLE` in this file says `int
+     * unsigned` (suite-wide gotcha, hub §4 rule 2b — drillreport hit this
+     * exact bug first). Confirm on any VM: `SHOW COLUMNS FROM
+     * glpi_plugin_sac_eolmap LIKE 'operatingsystemversions_id'` must say
+     * `unsigned`.
      */
     private static function migrateEolmapVersionKey(\Migration $m, \DBmysql $DB, string $t = 'glpi_plugin_sac_eolmap'): void
     {
@@ -158,10 +185,16 @@ final class Migration
         }
 
         if (!$DB->fieldExists($t, 'operatingsystemversions_id')) {
-            $m->addField($t, 'operatingsystemversions_id', 'integer', [
+            $m->addField($t, 'operatingsystemversions_id', 'fkey', [
                 'after' => 'operatingsystems_id',
                 'value' => 0,
             ]);
+        } elseif (!self::isUnsignedInt($DB, $t, 'operatingsystemversions_id')) {
+            // Retrofit for any VM that already upgraded through v1.1.0-v1.1.6,
+            // which added this column via addField(..., 'integer', ...) --
+            // signed. changeField() with a literal type string (not a keyword)
+            // per hub §4 rule 2b's documented fix pattern.
+            $m->changeField($t, 'operatingsystemversions_id', 'operatingsystemversions_id', 'int unsigned NOT NULL DEFAULT 0');
         }
         $m->migrationOneTable($t); // flush the column before the key below depends on it
 
@@ -183,6 +216,13 @@ final class Migration
      * would still see the old key as present and skip re-adding it — the
      * table would end up with no unique constraint on this column set at
      * all. Different names sidestep that ordering hazard entirely.
+     *
+     * Type keyword is `'fkey'`, NOT `'integer'` — see
+     * {@see migrateEolmapVersionKey()}'s docblock; same bug, same fix.
+     * `ref_subid` doesn't match the `*_id` naming convention the hub §4
+     * audit query (and possibly core's `migration:unsigned_keys`) looks
+     * for, so it needs this explicit retrofit regardless of whether the
+     * core command ever gets pointed at it.
      */
     private static function migrateReconcileSubId(\Migration $m, \DBmysql $DB): void
     {
@@ -192,10 +232,13 @@ final class Migration
         }
 
         if (!$DB->fieldExists($t, 'ref_subid')) {
-            $m->addField($t, 'ref_subid', 'integer', [
+            $m->addField($t, 'ref_subid', 'fkey', [
                 'after' => 'ref_id',
                 'value' => 0,
             ]);
+        } elseif (!self::isUnsignedInt($DB, $t, 'ref_subid')) {
+            // Retrofit for any VM that already upgraded through v1.1.0-v1.1.6.
+            $m->changeField($t, 'ref_subid', 'ref_subid', 'int unsigned NOT NULL DEFAULT 0');
         }
         $m->migrationOneTable($t);
 
@@ -299,6 +342,7 @@ final class Migration
                     $migration->executeMigration();
 
                     sac_assert($DB->fieldExists($t, 'operatingsystemversions_id'), 'operatingsystemversions_id added by the migration');
+                    sac_assert(self::isUnsignedInt($DB, $t, 'operatingsystemversions_id'), 'operatingsystemversions_id is unsigned (hub §4 rule 2b -- would have caught the addField(\'integer\',...) bug)');
                     sac_assert(self::keyExists($DB, $t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
                     sac_assert(!self::keyExists($DB, $t, 'os'), 'old os key dropped by the migration');
                 } finally {
