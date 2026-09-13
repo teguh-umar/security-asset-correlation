@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.3] - 2026-09-13
+
+### Fixed
+
+- **Status pills still weren't readable after v1.1.2** — the Tabler
+  `status`/`status-dot` classes used on both Overview and "Scan runs"
+  render as a flat neutral-gray pill in this GLPI install's theme, with no
+  colour distinction between `OK` and `Error` at all. Replaced with plain
+  `badge bg-success` / `badge bg-danger` / `badge bg-secondary` + explicit
+  `text-white` — the same colour classes already proven to render
+  correctly (they already colour the Overview card's top bar) — on both
+  `templates/overview.html.twig` and `templates/run.html.twig`.
+
 ## [1.1.2] - 2026-09-13
 
 ### Fixed

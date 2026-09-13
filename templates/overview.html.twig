@@ -25,16 +25,16 @@
 {% else %}
     {% for card in cards %}
     {% set st = card.status|default('') %}
-    {% set st_cls = st == 'ok' ? 'status-green' : (st == 'error' ? 'status-red' : 'status-yellow') %}
+    {% set st_bg = st == 'error' ? 'bg-danger' : (st == 'ok' ? 'bg-success' : 'bg-secondary') %}
     <div class="col-sm-6 col-lg-4">
         <div class="card">
-            <div class="card-status-top {{ st == 'error' ? 'bg-danger' : (st == 'ok' ? 'bg-success' : 'bg-secondary') }}"></div>
+            <div class="card-status-top {{ st_bg }}"></div>
             <div class="card-header">
                 <h3 class="card-title text-uppercase">{{ card.module }}</h3>
                 <div class="card-actions">
                     {% if st %}
-                        <span class="status {{ st_cls }}">
-                            <span class="status-dot"></span>{{ st == 'ok' ? __('OK', 'sac') : (st == 'error' ? __('Error', 'sac') : st) }}
+                        <span class="badge {{ st_bg }} text-white">
+                            {{ st == 'ok' ? __('OK', 'sac') : (st == 'error' ? __('Error', 'sac') : st) }}
                         </span>
                     {% endif %}
                 </div>
