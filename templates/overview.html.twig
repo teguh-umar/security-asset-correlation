@@ -48,6 +48,10 @@
                     {% endif %}
                 </div>
 
+                {% if st == 'error' and card.message %}
+                    <div class="alert alert-danger small py-1 px-2 mb-2">{{ card.message }}</div>
+                {% endif %}
+
                 <div class="datagrid">
                 {% for k, v in card.counts %}
                     <div class="datagrid-item">

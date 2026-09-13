@@ -47,6 +47,7 @@ foreach (['eol', 'license', 'eolcache'] as $module) {
         'module'         => $module,
         'date_end'       => $run['date_end'] ?? null,
         'status'         => $run['status'] ?? null,
+        'message'        => (string) ($run['message'] ?? ''),
         'counts'         => $run ? (json_decode((string) ($run['counts_json'] ?? ''), true) ?: []) : [],
         'open_reconcile' => $openReconcile,
         'findings_url'   => $findingsUrl,

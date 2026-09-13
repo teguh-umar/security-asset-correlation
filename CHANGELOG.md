@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.4] - 2026-09-13
+
+### Added
+
+- **A failed run's error message is now visible in the UI.** A run's `status`
+  can be `error` (an uncaught exception escaped `EolScan`/`LicenseScan`
+  entirely — a bug, distinct from the internal `errors` counter, which only
+  counts caught/handled per-item failures) with the exception message
+  stored in `glpi_plugin_sac_run.message` — but neither `front/overview.php`
+  nor `front/run.php` ever passed that column to their templates, so an
+  admin had no way to see *why* a run failed short of querying the database
+  directly. Both front controllers now include `message`; both Overview
+  (a small `alert-danger`) and "Scan runs" (red text under the status
+  badge) render it when a run's `status` is `error` and it has one.
+
 ## [1.1.3] - 2026-09-13
 
 ### Fixed
