@@ -105,17 +105,35 @@ final class EolCache
         }
     }
 
-    /** Whether $product has no cache row at all, or none fresher than $maxAgeDays. */
+    /**
+     * Whether $product has no cache row at all, or none fresher than
+     * $maxAgeDays.
+     *
+     * Built via raw `doQuery()` + `fetch_assoc()`, NOT the `$DB->request()`
+     * array builder: passing an aggregate expression like
+     * `'SELECT' => ['MAX(date_fetched) AS newest']` makes the builder quote
+     * the WHOLE string as one literal column identifier (backtick-wrapping
+     * `MAX(date_fetched)` verbatim) instead of treating it as a raw SQL
+     * expression — `Unknown column 'MAX(date_fetched)' in 'field list'`, a
+     * real crash caught on a live VM upgrade. `$DB->quote()` (VM-proven
+     * since `LicenseScan`'s v1.0.0/v1.0.1 candidate-software query) keeps
+     * `$product` — which ultimately traces back to admin-typed Reconcile
+     * form input, not just the shipped seed CSV — safely escaped.
+     */
     private static function isStale(string $product, int $maxAgeDays): bool
     {
         global $DB;
-        $cutoff = date('Y-m-d H:i:s', strtotime("-{$maxAgeDays} days"));
-        $row    = $DB->request([
-            'SELECT' => ['MAX(date_fetched) AS newest'],
-            'FROM'   => self::TABLE,
-            'WHERE'  => ['eol_product' => $product],
-        ])->current();
-        $newest = is_array($row) ? ($row['newest'] ?? null) : null;
+        $days   = (int) $maxAgeDays;
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+        $res    = $DB->doQuery(
+            'SELECT MAX(`date_fetched`) AS `newest` FROM `' . self::TABLE . '`'
+            . ' WHERE `eol_product` = ' . $DB->quote($product)
+        );
+        $newest = null;
+        if ($res) {
+            $row    = $res->fetch_assoc();
+            $newest = is_array($row) ? ($row['newest'] ?? null) : null;
+        }
         return $newest === null || (string) $newest < $cutoff;
     }
 
@@ -204,7 +222,12 @@ final class EolCache
             'db/eolcache-ensurefresh' => static function (): void {
                 global $DB;
                 $product = '__sac_ensurefresh__';
-                $runFloor = (int) ($DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current()['m'] ?? 0);
+                $runFloorRes = $DB->doQuery('SELECT MAX(`id`) AS `m` FROM `glpi_plugin_sac_run`');
+                $runFloor = 0;
+                if ($runFloorRes) {
+                    $runFloorRow = $runFloorRes->fetch_assoc();
+                    $runFloor = (int) (is_array($runFloorRow) ? ($runFloorRow['m'] ?? 0) : 0);
+                }
                 \GlpiPlugin\Sac\Http::$transport = static function (string $url, int $timeout): ?string {
                     return json_encode([
                         ['cycle' => '1', 'eol' => '2020-01-01', 'support' => '2019-01-01', 'lts' => false],
