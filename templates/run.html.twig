@@ -20,10 +20,10 @@
         <table class="table table-hover">
             <thead>
                 <tr>
-                    <th>{{ __('Module', 'sac') }}</th>
-                    <th>{{ __('Started', 'sac') }}</th>
-                    <th>{{ __('Ended', 'sac') }}</th>
-                    <th>{{ __('Status', 'sac') }}</th>
+                    <th data-sortable>{{ __('Module', 'sac') }}</th>
+                    <th data-sortable>{{ __('Started', 'sac') }}</th>
+                    <th data-sortable>{{ __('Ended', 'sac') }}</th>
+                    <th data-sortable>{{ __('Status', 'sac') }}</th>
                     <th>{{ __('Counts', 'sac') }}</th>
                 </tr>
             </thead>
@@ -34,7 +34,7 @@
                     <td>{{ r.module }}</td>
                     <td>{{ r.date_start }}</td>
                     <td>{{ r.date_end }}</td>
-                    <td>
+                    <td data-sort="{{ r.status }}">
                         <span class="badge {{ st_bg }} text-white">
                             {{ r.status == 'ok' ? __('OK', 'sac') : (r.status == 'error' ? __('Error', 'sac') : r.status) }}
                         </span>
@@ -56,6 +56,7 @@
             {% endfor %}
             </tbody>
         </table>
+        {% include '@sac/_sortable-table.html.twig' %}
     {% endif %}
     </div>
 </div>

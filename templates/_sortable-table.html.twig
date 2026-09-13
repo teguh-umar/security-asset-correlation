@@ -1,0 +1,62 @@
+{#
+ # SAC — shared click-to-sort behavior for a plain <table>. Include once on
+ # any page with a sortable table (`{% include '@sac/_sortable-table.html.twig' %}`).
+ # Mark a <th> with `data-sortable` to make its column sortable; a <td> may
+ # set `data-sort="<key>"` to sort on a value other than its own visible text
+ # (e.g. to strip a trailing sub-label). Never mark a control column
+ # (buttons/forms/dropdowns) sortable.
+ #
+ # Event-delegated (bound on `document`, not queried/bound against the table
+ # directly) so it works regardless of where this script tag ends up relative
+ # to the table markup — the exact ordering bug riskregister v1.5.1 hotfixed
+ # (a script querying `document.querySelectorAll(...)` at parse time, before
+ # its own table existed further down the same page, wired zero handlers).
+ #}
+<style>
+    th[data-sortable] { cursor: pointer; user-select: none; }
+    th[data-sortable]::after { content: "\00a0\00a0"; opacity: .35; }
+    th[data-sortable].sac-sort-asc::after { content: "▲"; opacity: 1; }
+    th[data-sortable].sac-sort-desc::after { content: "▼"; opacity: 1; }
+</style>
+<script>
+(function () {
+    function sortKeyOf(cell) {
+        var raw = cell.hasAttribute('data-sort') ? cell.getAttribute('data-sort') : cell.textContent.trim();
+        var num = parseFloat(raw);
+        if (raw !== '' && /^-?[\d.]+$/.test(raw.trim()) && !isNaN(num)) {
+            return { n: num };
+        }
+        return { s: raw.toLowerCase() };
+    }
+
+    function compareKeys(a, b) {
+        if ('n' in a && 'n' in b) { return a.n - b.n; }
+        var as = 'n' in a ? String(a.n) : a.s;
+        var bs = 'n' in b ? String(b.n) : b.s;
+        return as.localeCompare(bs);
+    }
+
+    document.addEventListener('click', function (event) {
+        var th = event.target.closest('th[data-sortable]');
+        if (!th) { return; }
+        var table = th.closest('table');
+        var tbody = table ? table.tBodies[0] : null;
+        if (!tbody) { return; }
+
+        var index = Array.prototype.indexOf.call(th.parentNode.children, th);
+        var ascending = !th.classList.contains('sac-sort-asc');
+
+        Array.prototype.forEach.call(th.parentNode.children, function (h) {
+            h.classList.remove('sac-sort-asc', 'sac-sort-desc');
+        });
+        th.classList.add(ascending ? 'sac-sort-asc' : 'sac-sort-desc');
+
+        var rows = Array.prototype.slice.call(tbody.rows);
+        rows.sort(function (r1, r2) {
+            var cmp = compareKeys(sortKeyOf(r1.cells[index]), sortKeyOf(r2.cells[index]));
+            return ascending ? cmp : -cmp;
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+    });
+})();
+</script>

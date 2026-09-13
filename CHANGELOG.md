@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.6] - 2026-09-13
+
+### Added
+
+- **Click-to-sort on the Reconcile and Scan-runs tables** — per the
+  suite-wide UI rule (`pgn-glpi-suite`, generalizing riskregister's Reconcile
+  pattern): any column carrying a single sortable value gets it, control
+  columns don't. New shared partial `templates/_sortable-table.html.twig`
+  (`{% include '@sac/_sortable-table.html.twig' %}`) — event-delegated
+  (bound on `document`, not on the table itself), so it works regardless of
+  where the script tag sits relative to the table markup, avoiding the exact
+  ordering bug riskregister v1.5.1 hotfixed (a script querying the DOM at
+  parse time, before its own table existed further down the page).
+  - **Reconcile:** Status, Signal, Reason, Reference, Mapping, First seen,
+    Last seen are sortable; Actions (buttons/forms) is not. The Reference
+    column sorts on the plain label, ignoring its "(Itemtype #id)" suffix.
+  - **Scan runs:** Module, Started, Ended, Status are sortable; Counts is
+    not — it's several key/value pairs per cell, not one sortable value.
+
 ## [1.1.5] - 2026-09-13
 
 ### Fixed
