@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.7] - 2026-09-13
+
+### Fixed
+
+- **`operatingsystemversions_id` / `ref_subid` were signed, not unsigned** —
+  suite-wide rule (`pgn-glpi-suite` §4 rule 2b, GLPI's Setup warning
+  *"primary or foreign keys columns are using signed integers"*): GLPI's
+  `\Migration::addField()`/`changeField()` only emit `UNSIGNED` for the
+  `'fkey'` type keyword (or `'autoincrement'` for a PK) — `'integer'`/`'int'`
+  silently produce a signed column even though this file's `CREATE TABLE`
+  DDL has always said `int unsigned`. Both v1.1.0 upgrade-path `addField()`
+  calls used `'integer'` — same bug class drillreport hit first (v0.8.5).
+  Fixed: both now use `'fkey'`; added a `changeField()` retrofit for any VM
+  that already upgraded through v1.1.0–v1.1.6 with the signed column,
+  gated on a new `Migration::isUnsignedInt()` check so it's a no-op once
+  fixed. `ref_subid` doesn't match GLPI's `*_id` naming convention, so it
+  needed this explicit retrofit regardless of whether a later
+  `migration:unsigned_keys` run would have caught it. `db/migration-eolmap-key`
+  now also asserts the migrated column is unsigned.
+- No negative sentinel values exist in any SAC key column (audited
+  suite-wide) — nothing else to retrofit.
+
 ## [1.1.6] - 2026-09-13
 
 ### Added
