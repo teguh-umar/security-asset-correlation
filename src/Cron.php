@@ -65,8 +65,12 @@ class Cron extends CommonDBTM
                     return; // skip: riskregister active
                 }
                 global $DB;
-                $floor = (int) ($DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])
-                    ->current()['m'] ?? 0);
+                $floorRes = $DB->doQuery('SELECT MAX(`id`) AS `m` FROM `glpi_plugin_sac_run`');
+                $floor    = 0;
+                if ($floorRes) {
+                    $floorRow = $floorRes->fetch_assoc();
+                    $floor    = (int) (is_array($floorRow) ? ($floorRow['m'] ?? 0) : 0);
+                }
                 try {
                     $rc = self::cronEolScan(new \CronTask());
                     sac_assert($rc === 0 || $rc === 1, 'cronEolScan returned a valid code without throwing');

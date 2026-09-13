@@ -469,7 +469,11 @@ final class EolScan
     private static function scRunFloor(): int
     {
         global $DB;
-        $row = $DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current();
+        $res = $DB->doQuery('SELECT MAX(`id`) AS `m` FROM `glpi_plugin_sac_run`');
+        if (!$res) {
+            return 0;
+        }
+        $row = $res->fetch_assoc();
         return (int) (is_array($row) ? ($row['m'] ?? 0) : 0);
     }
 

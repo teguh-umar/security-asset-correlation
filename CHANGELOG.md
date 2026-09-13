@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.1.8] - 2026-09-13
+
+### Fixed
+
+- **The actual root cause of EOL scan's "Error" status, finally visible
+  thanks to v1.1.4's error-message surfacing:**
+  `MySQL query error: Unknown column 'MAX(date_fetched)' in 'field list'`.
+  `EolCache::isStale()` (called by `ensureFresh()` between `EolScan`'s two
+  passes — on the hot path of every real run) passed
+  `'SELECT' => ['MAX(date_fetched) AS newest']` to `$DB->request()`'s array
+  query builder. The builder quotes each `SELECT` entry as a literal column
+  identifier rather than treating it as a SQL expression, so the whole
+  aggregate-plus-alias string got backtick-wrapped verbatim into an
+  obviously-nonexistent column name. Rewritten to raw `doQuery()` +
+  `fetch_assoc()` (the same pattern already proven in this file's own
+  `staleProducts()`), with `$DB->quote()` (VM-proven since `LicenseScan`
+  v1.0.0/v1.0.1) for the product value — which traces back to admin-typed
+  Reconcile input, not just the shipped seed CSV.
+- **Same broken `'SELECT' => ['MAX(id) AS m']` pattern found in 4 more
+  places** (a repo-wide grep after finding the first one): the
+  `db/writer-riskregister-inactive` selfCheck in `src/Cron.php`, the
+  `db/eolcache-ensurefresh` selfCheck in `src/Eol/EolCache.php`, and the
+  `scRunFloor()` helper duplicated in `src/Eol/EolScan.php` and
+  `src/License/LicenseScan.php` (used by every one of their own selfCheck
+  teardowns). None of these run during a normal cron tick, but every one
+  would have crashed `tools/selfcheck.php` on first real use. All 5 fixed
+  the same way.
+
 ## [1.1.7] - 2026-09-13
 
 ### Fixed
