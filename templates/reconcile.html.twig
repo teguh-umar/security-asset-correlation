@@ -62,9 +62,9 @@
                 <tr class="{{ row.is_resolved ? 'text-muted' : '' }}">
                     <td>
                         {% if row.is_resolved %}
-                            <span class="badge bg-success">{{ __('Resolved', 'sac') }}</span>
+                            <span class="badge bg-success text-white">{{ __('Resolved', 'sac') }}</span>
                         {% else %}
-                            <span class="badge bg-warning">{{ __('Open', 'sac') }}</span>
+                            <span class="badge bg-warning text-dark">{{ __('Open', 'sac') }}</span>
                         {% endif %}
                     </td>
                     <td>{{ row.signal_type }}</td>
