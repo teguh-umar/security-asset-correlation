@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.5] - 2026-09-13
+
+### Fixed
+
+- **Reconcile page's "Resolved"/"Open" badges had no explicit text colour**
+  (`templates/reconcile.html.twig`) — unlike the status badges added in
+  v1.1.3 elsewhere in the plugin. Two real contrast bugs, found on a
+  suite-wide audit prompted by `pgn-glpi-suite-*`'s badge-contrast rule:
+  the "Resolved" badge (`bg-success`) sat inside a row with
+  `class="text-muted"`, so it inherited muted grey text on a green
+  background instead of setting its own; the "Open" badge (`bg-warning`)
+  set no text colour at all, so in a dark theme it likely rendered light
+  text on its pale-yellow background. Both now set an explicit,
+  contrast-correct colour: `text-white` for the green "Resolved" badge,
+  `text-dark` for the yellow "Open" badge (warning/yellow backgrounds need
+  dark text, unlike success/danger/secondary, which need white — the same
+  pairing already used correctly for the OK/Error badges elsewhere in this
+  plugin).
+
 ## [1.1.4] - 2026-09-13
 
 ### Added
