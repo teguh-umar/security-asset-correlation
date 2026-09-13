@@ -18,6 +18,7 @@ foreach ($DB->request([
         'date_start' => $row['date_start'],
         'date_end'   => $row['date_end'],
         'status'     => (string) $row['status'],
+        'message'    => (string) ($row['message'] ?? ''),
         'counts'     => json_decode((string) ($row['counts_json'] ?? ''), true) ?: [],
     ];
 }

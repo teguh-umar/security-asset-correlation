@@ -38,6 +38,9 @@
                         <span class="badge {{ st_bg }} text-white">
                             {{ r.status == 'ok' ? __('OK', 'sac') : (r.status == 'error' ? __('Error', 'sac') : r.status) }}
                         </span>
+                        {% if r.status == 'error' and r.message %}
+                            <div class="small text-danger mt-1">{{ r.message }}</div>
+                        {% endif %}
                     </td>
                     <td>
                     {% for k, v in r.counts %}
