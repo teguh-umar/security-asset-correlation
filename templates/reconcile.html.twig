@@ -47,13 +47,13 @@
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
-                    <th>{{ __('Status', 'sac') }}</th>
-                    <th>{{ __('Signal', 'sac') }}</th>
-                    <th>{{ __('Reason', 'sac') }}</th>
-                    <th>{{ __('Reference', 'sac') }}</th>
-                    <th>{{ __('Mapping', 'sac') }}</th>
-                    <th>{{ __('First seen', 'sac') }}</th>
-                    <th>{{ __('Last seen', 'sac') }}</th>
+                    <th data-sortable>{{ __('Status', 'sac') }}</th>
+                    <th data-sortable>{{ __('Signal', 'sac') }}</th>
+                    <th data-sortable>{{ __('Reason', 'sac') }}</th>
+                    <th data-sortable>{{ __('Reference', 'sac') }}</th>
+                    <th data-sortable>{{ __('Mapping', 'sac') }}</th>
+                    <th data-sortable>{{ __('First seen', 'sac') }}</th>
+                    <th data-sortable>{{ __('Last seen', 'sac') }}</th>
                     <th>{{ __('Actions', 'sac') }}</th>
                 </tr>
             </thead>
@@ -69,7 +69,7 @@
                     </td>
                     <td>{{ row.signal_type }}</td>
                     <td>{{ row.reason }}</td>
-                    <td>
+                    <td data-sort="{{ row.label }}">
                         {{ row.label }}
                         {% if row.ref_id > 0 %}
                             <small class="text-muted">({{ row.ref_itemtype }} #{{ row.ref_id }})</small>
@@ -124,6 +124,7 @@
             {% endfor %}
             </tbody>
         </table>
+        {% include '@sac/_sortable-table.html.twig' %}
     {% endif %}
     </div>
 </div>
