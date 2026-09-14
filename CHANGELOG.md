@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.3] - 2026-09-14
+
+### Fixed
+
+- **Shared "PGN Suite" tab (`lib/pgnsuite/ConfigTab.php`) had an unreadable
+  active sub-tab** — pale-yellow text on `.nav-pills` active state. Visual
+  fix only, approved by the suite maintainers upstream (hub §5, canonical
+  copy now r2, SHA-256 `347d56c91508e53326c8d4de74105628d0fd535bde619fe8a94eb147a448cbd6`).
+  Same API, `CONTRACT_VERSION` unchanged at 1 — re-copied the canonical
+  file, nothing else in SAC changes.
+
 ## [1.3.2] - 2026-09-14
 
 ### Fixed
