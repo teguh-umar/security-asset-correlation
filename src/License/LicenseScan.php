@@ -22,6 +22,12 @@ use GlpiPlugin\Sac\Severity;
  * `Cron::cronLicenseScan` owns the RunLog begin/finish; this class only bumps
  * counters. Every riskregister write goes through {@see FindingWriter}. Reads of
  * GLPI core tables are read-only.
+ *
+ * Every Finding here is also linked (via `FindingWriter`'s `$extraLinks`) to
+ * the affected `Software` item(s), not just the affected Computers —
+ * riskregister already has a native "Findings" tab on Software (confirmed
+ * with risk-register-dashboard-c8), so this is what makes a SAC license
+ * Finding actually show up there.
  */
 final class LicenseScan
 {
@@ -38,7 +44,7 @@ final class LicenseScan
         // Hoist the per-run-stable category id out of the software loop (I7).
         $licenseCatId = FindingWriter::categoryId('License Compliance', $entity);
 
-        /** @var array<int,array<int,array{name:string,installs:int,cids:array<int,int>}>> */
+        /** @var array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>> */
         $byPub = [];
 
         foreach (self::candidateSoftware($ignore) as $sw) {
@@ -64,6 +70,7 @@ final class LicenseScan
             if ($mid > 0 && !$hasLicense && in_array($mid, $commercial, true)) {
                 $byPub[$mid][] = [
                     'name'     => $swName,
+                    'sid'      => $sid,
                     'installs' => $installs,
                     'cids'     => array_map('intval', array_keys($assets['resolved'])),
                 ];
@@ -98,7 +105,13 @@ final class LicenseScan
                         'plugin_riskregister_riskcategories_id' => $licenseCatId,
                         'status'       => 'Open',
                     ];
-                    FindingWriter::upsert($input, array_map('intval', array_keys($assets['resolved'])), '', $run);
+                    FindingWriter::upsert(
+                        $input,
+                        array_map('intval', array_keys($assets['resolved'])),
+                        '',
+                        $run,
+                        [['itemtype' => 'Software', 'items_id' => $sid]]
+                    );
                 } elseif ($checkOver) {
                     // 2b is enabled and this software was over-deployed before but
                     // is not now — clear the prior Finding. When 2b is off we never
@@ -120,7 +133,7 @@ final class LicenseScan
      * One 2a Finding per publisher in $byPub; a cleared note for every active
      * commercial publisher that produced no unlicensed product this run.
      *
-     * @param array<int,array<int,array{name:string,installs:int,cids:array<int,int>}>> $byPub
+     * @param array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>> $byPub
      * @param array<int,int> $commercial
      * @param int $licenseCatId hoisted "License Compliance" category id (I7)
      */
@@ -143,6 +156,16 @@ final class LicenseScan
 
             $cidLists = array_column($rows, 'cids');
             $allCids  = $cidLists === [] ? [] : array_values(array_unique(array_merge(...$cidLists)));
+
+            // Link the Finding to every unlicensed product's own Software item
+            // (in addition to the affected Computers above) so riskregister's
+            // native Findings tab on each of those Software pages shows this
+            // publisher-level finding too, not just the Computer side.
+            $softwareIds = array_values(array_unique(array_column($rows, 'sid')));
+            $extraLinks  = array_map(
+                static fn (int $sid): array => ['itemtype' => 'Software', 'items_id' => $sid],
+                $softwareIds
+            );
 
             $pub   = self::manufacturerName($mid);
             $lines = [];
@@ -167,7 +190,7 @@ final class LicenseScan
                 'plugin_riskregister_riskcategories_id' => $licenseCatId,
                 'status'       => 'Open',
             ];
-            FindingWriter::upsert($input, $allCids, '', $run);
+            FindingWriter::upsert($input, $allCids, '', $run, $extraLinks);
         }
 
         foreach ($commercial as $mid) {
@@ -418,6 +441,13 @@ final class LicenseScan
                         'items_id'                        => $ids['cid'],
                     ]);
                     sac_assert_eq(count($links), 1, 'LIC-1: one Finding_Item to the seeded Computer');
+
+                    $swLinks = $fi->find([
+                        'plugin_riskregister_findings_id' => (int) array_key_first($rows),
+                        'itemtype'                        => 'Software',
+                        'items_id'                        => $ids['sid'],
+                    ]);
+                    sac_assert_eq(count($swLinks), 1, 'LIC-1: one Finding_Item to the seeded Software (riskregister\'s native tab there)');
                 } finally {
                     self::scTeardown($ids, [$code], $startId);
                 }
@@ -470,6 +500,14 @@ final class LicenseScan
                     $overRows = $f->find(['code' => $overCode]);
                     sac_assert_eq(count($overRows), 1, 'LIC-2: one 2b Finding');
                     sac_assert_eq($overRows[array_key_first($overRows)]['severity'], 'High', 'LIC-2: 2 installs / 1 seat → High');
+
+                    $fi      = new \GlpiPlugin\Riskregister\Finding_Item();
+                    $swLinks = $fi->find([
+                        'plugin_riskregister_findings_id' => (int) array_key_first($overRows),
+                        'itemtype'                        => 'Software',
+                        'items_id'                        => $ids['sid'],
+                    ]);
+                    sac_assert_eq(count($swLinks), 1, 'LIC-2: the 2b Finding is also linked to its own Software item');
 
                     $missRows = $f->find(['code' => $missCode]);
                     sac_assert_eq(count($missRows), 1, 'LIC-2: 2a Finding still one row');

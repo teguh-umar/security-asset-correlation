@@ -37,15 +37,22 @@ final class FindingWriter
 
     /**
      * Find a Finding by (entities_id, code); update it (status-preserving) or
-     * add it; then ensure one Finding_Item link per computer id. Idempotent.
+     * add it; then ensure one Finding_Item link per computer id (plus any
+     * `$extraLinks`). Idempotent.
      *
      * @param array<string,mixed> $input       full add-payload (caller-built)
      * @param array<int,int|string> $computerIds  GLPI Computer ids to link
      * @param string $rawAssetText  the un-resolved asset string, for audit
+     * @param array<int,array{itemtype:string,items_id:int}> $extraLinks
+     *        Additional `Finding_Item` links beyond Computer — e.g. the
+     *        affected `Software` item(s), so riskregister's own native
+     *        "Findings" tab (already present on Software via `addtabon`,
+     *        confirmed with risk-register-dashboard-c8) actually shows a
+     *        SAC license Finding there, not just on the Computer side.
      * @return int|null  the Finding id, or null when riskregister is absent /
      *                    the add failed
      */
-    public static function upsert(array $input, array $computerIds, string $rawAssetText, RunLog $run): ?int
+    public static function upsert(array $input, array $computerIds, string $rawAssetText, RunLog $run, array $extraLinks = []): ?int
     {
         if (!self::isAvailable()) {
             $run->bump('errors');
@@ -75,22 +82,31 @@ final class FindingWriter
         $run->bump('findings_upserted');
 
         foreach ($computerIds as $cid) {
-            $li  = new \GlpiPlugin\Riskregister\Finding_Item();
-            $has = $li->find([
-                'plugin_riskregister_findings_id' => $id,
-                'itemtype'                        => 'Computer',
-                'items_id'                        => $cid,
-            ]);
-            if (!$has) {
-                $li->add([
-                    'plugin_riskregister_findings_id' => $id,
-                    'itemtype'                        => 'Computer',
-                    'items_id'                        => (int) $cid,
-                ]);
-            }
+            self::linkOnce($id, 'Computer', (int) $cid);
+        }
+        foreach ($extraLinks as $link) {
+            self::linkOnce($id, (string) $link['itemtype'], (int) $link['items_id']);
         }
 
         return $id;
+    }
+
+    /** Idempotent: add a `Finding_Item` link only if it doesn't already exist. */
+    private static function linkOnce(int $findingId, string $itemtype, int $itemsId): void
+    {
+        $li  = new \GlpiPlugin\Riskregister\Finding_Item();
+        $has = $li->find([
+            'plugin_riskregister_findings_id' => $findingId,
+            'itemtype'                        => $itemtype,
+            'items_id'                        => $itemsId,
+        ]);
+        if (!$has) {
+            $li->add([
+                'plugin_riskregister_findings_id' => $findingId,
+                'itemtype'                        => $itemtype,
+                'items_id'                        => $itemsId,
+            ]);
+        }
     }
 
     /**
@@ -208,6 +224,50 @@ final class FindingWriter
                         $f->delete(['id' => (int) $fid], true);
                     }
                     (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            // VM-only — the $extraLinks mechanism itself, independent of any
+            // one caller (LicenseScan exercises it end-to-end separately).
+            'db/writer-extralinks-idempotent' => static function (): void {
+                if (!self::isAvailable()) {
+                    return;
+                }
+                $run  = RunLog::begin('selftest');
+                $code = '__SAC_SC_EXTRALINKS__';
+                $ent  = 0;
+                $input = [
+                    'entities_id' => $ent,
+                    'code'        => $code,
+                    'name'        => 'SAC selfcheck extraLinks',
+                    'scope_label' => 'selftest',
+                    'severity'    => 'Low',
+                    'status'      => 'Open',
+                ];
+
+                $sw = new \Software();
+                $sid = (int) $sw->add(['name' => '__sac_sc_extralinks_sw__', 'entities_id' => $ent]);
+                sac_assert($sid > 0, 'seed software created');
+
+                $f  = new \GlpiPlugin\Riskregister\Finding();
+                $fi = new \GlpiPlugin\Riskregister\Finding_Item();
+                try {
+                    $extraLinks = [['itemtype' => 'Software', 'items_id' => $sid]];
+                    $id1 = self::upsert($input, [], '', $run, $extraLinks);
+                    $id2 = self::upsert($input, [], '', $run, $extraLinks);
+                    sac_assert($id1 !== null && $id1 === $id2, 'same finding id on re-run');
+
+                    $links = $fi->find([
+                        'plugin_riskregister_findings_id' => $id1,
+                        'itemtype'                         => 'Software',
+                        'items_id'                         => $sid,
+                    ]);
+                    sac_assert_eq(count($links), 1, 'exactly one Finding_Item link after two upserts — idempotent, not doubled');
+                } finally {
+                    foreach (array_keys($f->find(['entities_id' => $ent, 'code' => $code])) as $fid) {
+                        $f->delete(['id' => (int) $fid], true);
+                    }
+                    (new \Software())->delete(['id' => $sid], true);
                 }
             },
         ];
