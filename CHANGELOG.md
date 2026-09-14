@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.1] - 2026-09-14
+
+### Changed
+
+- **Overview page: the "EOLCACHE" card was confusing** — it rendered as a
+  bare uppercased module key sitting alongside "EOL" and "LICENSE", reading
+  as a 3rd security-signal category when it's actually the internal
+  `EolCacheRefresh` cron that just refreshes the local `endoflife.date`
+  mirror the EOL scan reads from. Every card now shows a proper title
+  ("EOL / EOS", "License Governance", "EOL Cache Refresh") and a one-line
+  description; the EOL Cache Refresh card's description explicitly says
+  it's maintenance, not a signal. Also dropped its always-zero "Open
+  reconcile" line, which never applied to that module (it never had its own
+  reconcile queue) and only added to the confusion.
+
 ## [1.2.0] - 2026-09-14
 
 ### Added

@@ -13,6 +13,22 @@
     'skipped':          __('Skipped (not an OS)', 'sac'),
     'cache_pending':    __('Awaiting endoflife.date', 'sac')
 } %}
+{#
+ # `eolcache` is NOT a security-signal module like `eol`/`license` — it's the
+ # internal cron that refreshes the local endoflife.date mirror those scans
+ # read from. Shown as its own card only for run-health visibility, but with
+ # a distinct title + description so it doesn't read as a 3rd signal type.
+ #}
+{% set card_titles = {
+    'eol':      __('EOL / EOS', 'sac'),
+    'license':  __('License Governance', 'sac'),
+    'eolcache': __('EOL Cache Refresh', 'sac')
+} %}
+{% set card_descriptions = {
+    'eol':      __('Security signal — OS and hardware end-of-life.', 'sac'),
+    'license':  __('Security signal — license compliance.', 'sac'),
+    'eolcache': __('Internal maintenance, not a security signal — refreshes the local endoflife.date mirror the EOL scan above reads from. A problem here means the refresh failed, not that any asset is at risk.', 'sac')
+} %}
 <div class="row row-cards">
 {% if cards is empty %}
     <div class="col-12">
@@ -30,7 +46,7 @@
         <div class="card">
             <div class="card-status-top {{ st_bg }}"></div>
             <div class="card-header">
-                <h3 class="card-title text-uppercase">{{ card.module }}</h3>
+                <h3 class="card-title">{{ card_titles[card.module]|default(card.module|upper) }}</h3>
                 <div class="card-actions">
                     {% if st %}
                         <span class="badge {{ st_bg }} text-white">
@@ -40,6 +56,10 @@
                 </div>
             </div>
             <div class="card-body">
+                {% if card_descriptions[card.module] is defined %}
+                    <div class="text-muted small mb-2">{{ card_descriptions[card.module] }}</div>
+                {% endif %}
+
                 <div class="text-muted small mb-2">
                     {% if card.date_end %}
                         {{ __('Last run', 'sac') }}: {{ card.date_end }}
@@ -59,10 +79,12 @@
                         <div class="datagrid-content{{ k == 'errors' and v > 0 ? ' text-danger fw-bold' : '' }}">{{ v }}</div>
                     </div>
                 {% endfor %}
+                {% if card.module != 'eolcache' %}
                     <div class="datagrid-item">
                         <div class="datagrid-title">{{ __('Open reconcile', 'sac') }}</div>
                         <div class="datagrid-content fw-bold">{{ card.open_reconcile }}</div>
                     </div>
+                {% endif %}
                 </div>
 
                 {% if card.findings_url %}
