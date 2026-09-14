@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.0] - 2026-09-14
+
+### Added
+
+- **SAC's Setup screen joins the shared "PGN Suite" tab** on Setup > General
+  (hub §5 contract) — one tab, one vertical sub-tab per plugin. New
+  `lib/pgnsuite/ConfigTab.php` (byte-identical copy of the canonical suite
+  file, SHA-256 verified before committing — never edit this file directly,
+  changes go through the canonical copy) and `src/SuiteConfig.php`
+  (`section()` gates on `plugin_sac_config` READ — `ConfigTab` itself only
+  checks core `config`; `render()` echoes the same form as before).
+
+### Changed
+
+- **SAC's standalone "Setup" menu entry is gone** — config now lives in the
+  shared tab. The old URL (`front/config.php`) still works: a user with core
+  `config` READ is redirected straight to the shared tab (no divergent
+  second copy of the form); a user with `plugin_sac_config` but not core
+  `config` (so no route to Setup > General at all) still sees the standalone
+  page directly. Saving from either entry point lands back on the shared
+  tab with SAC's section active.
+
 ## [1.2.1] - 2026-09-14
 
 ### Changed
