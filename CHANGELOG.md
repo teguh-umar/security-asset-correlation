@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0] - 2026-09-14
+
+### Added
+
+- **License Findings now also link to their Software item, not just affected
+  Computers** — riskregister already has a native "Findings" tab on Software
+  (confirmed with risk-register-dashboard-c8, via `Finding_Item`
+  `addtabon`), but SAC never created a link pointing there, so it stayed
+  empty for SAC's own findings. `FindingWriter::upsert()` gained an optional
+  `$extraLinks` parameter (`array<int,array{itemtype:string,items_id:int}>`)
+  for `Finding_Item` links beyond Computer; `LicenseScan` now passes it for
+  both **2b** (the specific over-deployed Software) and **2a** (every
+  unlicensed product from that publisher). No new tab, no schema change, no
+  migration — riskregister's own tab already existed, this just feeds it.
+  `EolScan`'s calls are unaffected (the parameter defaults to empty).
+- Considered and deferred a similar `OperatingSystem` tab: riskregister
+  doesn't have OS in its linkable-itemtype candidate list today (would need
+  a small change on their side), and EOL Findings are already visible via
+  the Computer tab they're linked to — low marginal value for the added
+  cross-plugin coordination. Revisit if there's a concrete need for an
+  OS-centric view.
+
 ## [1.1.9] - 2026-09-13
 
 ### Added

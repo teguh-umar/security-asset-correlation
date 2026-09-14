@@ -3,7 +3,7 @@
 use GlpiPlugin\Sac\Menu;
 use GlpiPlugin\Sac\Profile as SacProfile;
 
-define('PLUGIN_SAC_VERSION', '1.1.9');
+define('PLUGIN_SAC_VERSION', '1.2.0');
 define('PLUGIN_SAC_MIN_GLPI', '11.0.0');
 define('PLUGIN_SAC_MAX_GLPI', '11.9.99');
 
