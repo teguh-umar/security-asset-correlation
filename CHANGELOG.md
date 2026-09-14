@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.1] - 2026-09-14
+
+### Fixed
+
+- **v1.3.0's standalone config page always redirected to the shared PGN
+  Suite tab after saving — stranding the one user it exists for.** A user
+  with `plugin_sac_config` but not core `config` READ has no route to
+  Setup > General at all; unconditionally redirecting them to
+  `ConfigTab::getReturnUrl('sac')` on every save sent them somewhere they
+  couldn't open (caught before this shipped to a VM, hub §5). Fixed per the
+  suite-standard pattern: `SuiteConfig::render()` now takes a
+  `$fromPgnSuite` flag (true only via the new `renderForTab()` entry point
+  the shared tab actually calls), which adds a hidden `_from_pgnsuite`
+  field to the form; `front/config.php`'s POST handler redirects to the
+  shared tab only when that field is present, `Html::back()` otherwise.
+
 ## [1.3.0] - 2026-09-14
 
 ### Added
