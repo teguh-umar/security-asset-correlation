@@ -25,11 +25,18 @@ class Menu extends CommonGLPI
             || Session::haveRight('plugin_sac_config', READ);
     }
 
-    /** @return array<string,mixed>|false */
+    /**
+     * `plugin_sac_config`'s own screen no longer has a menu entry here — it
+     * moved to the shared "PGN Suite" tab on Setup > General (hub §5
+     * contract, `SuiteConfig`); the standalone page at front/config.php
+     * still works by direct URL for a config-only user with no route to
+     * Setup > General.
+     *
+     * @return array<string,mixed>|false
+     */
     public static function getMenuContent()
     {
         $finding_read = Session::haveRight('plugin_sac_finding', READ);
-        $config_read  = Session::haveRight('plugin_sac_config', READ);
 
         $entries = [];
 
@@ -54,16 +61,6 @@ class Menu extends CommonGLPI
                 'page'  => $runs,
                 'icon'  => 'ti ti-history',
                 'links' => ['search' => $runs],
-            ];
-        }
-
-        if ($config_read) {
-            $setup = '/plugins/sac/front/config.php';
-            $entries['setup'] = [
-                'title' => __('Setup', 'sac'),
-                'page'  => $setup,
-                'icon'  => 'ti ti-settings',
-                'links' => ['search' => $setup],
             ];
         }
 

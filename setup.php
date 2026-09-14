@@ -2,8 +2,9 @@
 
 use GlpiPlugin\Sac\Menu;
 use GlpiPlugin\Sac\Profile as SacProfile;
+use GlpiPlugin\Sac\SuiteConfig;
 
-define('PLUGIN_SAC_VERSION', '1.2.1');
+define('PLUGIN_SAC_VERSION', '1.3.0');
 define('PLUGIN_SAC_MIN_GLPI', '11.0.0');
 define('PLUGIN_SAC_MAX_GLPI', '11.9.99');
 
@@ -42,6 +43,16 @@ function plugin_init_sac(): void
 
     // Rights tab on Profile.
     Plugin::registerClass(SacProfile::class, ['addtabon' => ['Profile']]);
+
+    // Shared "PGN Suite" tab on Setup > General (hub §5 contract). The class
+    // is a byte-identical copy of the canonical file (SHA-256 verified before
+    // committing) — never edit lib/pgnsuite/ConfigTab.php on its own; changes
+    // go through the canonical copy and get redistributed.
+    if (!class_exists(\GlpiPlugin\Pgnsuite\ConfigTab::class, false)) {
+        require_once __DIR__ . '/lib/pgnsuite/ConfigTab.php';
+    }
+    \GlpiPlugin\Pgnsuite\ConfigTab::register();
+    $PLUGIN_HOOKS[\GlpiPlugin\Pgnsuite\ConfigTab::HOOK]['sac'] = SuiteConfig::class . '::section';
 
     // Cron tasks are registered in plugin_sac_install(); nothing needed here.
 }

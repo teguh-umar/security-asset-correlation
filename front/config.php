@@ -1,6 +1,7 @@
 <?php
 
 use GlpiPlugin\Sac\Config;
+use GlpiPlugin\Sac\SuiteConfig;
 
 include('../../../inc/includes.php');
 
@@ -67,29 +68,22 @@ if (isset($_POST['update'])) {
         \Config::setConfigurationValues(Config::CONTEXT, $save);
         Session::addMessageAfterRedirect(__('Updated', 'sac'));
     }
-    Html::back();
+    // Both the standalone page and the shared PGN Suite tab post here; land
+    // back on the tab either way (hub §5 contract) rather than Html::back(),
+    // which would strand a tab-originated save on this bare page.
+    Html::redirect(\GlpiPlugin\Pgnsuite\ConfigTab::getReturnUrl('sac'));
+}
+
+// A user with core `config` READ can reach the shared tab directly — send
+// them there instead of showing a second, divergent copy of this form. Only
+// a user with `plugin_sac_config` but NOT core `config` (so no route to
+// Setup > General at all) sees this standalone page.
+if (Session::haveRight('config', READ)) {
+    Html::redirect(\GlpiPlugin\Pgnsuite\ConfigTab::getReturnUrl('sac'));
 }
 
 Html::header(__('Security Assessment', 'sac'), '', 'sac', 'setup');
 
-$values = \Config::getConfigurationValues(Config::CONTEXT);
-
-// Framework-generated markup (the one legit |raw in the template).
-$entityCurrent  = (int) ($values['finding_entity'] ?? Config::DEFAULTS['finding_entity']);
-$entityDropdown = \Entity::dropdown([
-    'name'    => 'finding_entity',
-    'value'   => $entityCurrent,
-    'entity'  => $_SESSION['glpiactive_entity'] ?? 0,
-    'display' => false,
-]);
-
-$ctx = [
-    'action'          => Html::getPrefixedUrl('/plugins/sac/front/config.php'),
-    'values'          => $values,
-    'defaults'        => Config::DEFAULTS,
-    'types'           => Config::FIELD_TYPES,
-    'entity_dropdown' => $entityDropdown,
-];
-\Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/config.html.twig', $ctx);
+SuiteConfig::render();
 
 Html::footer();
