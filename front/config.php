@@ -68,10 +68,18 @@ if (isset($_POST['update'])) {
         \Config::setConfigurationValues(Config::CONTEXT, $save);
         Session::addMessageAfterRedirect(__('Updated', 'sac'));
     }
-    // Both the standalone page and the shared PGN Suite tab post here; land
-    // back on the tab either way (hub §5 contract) rather than Html::back(),
-    // which would strand a tab-originated save on this bare page.
-    Html::redirect(\GlpiPlugin\Pgnsuite\ConfigTab::getReturnUrl('sac'));
+    // Both the standalone page and the shared PGN Suite tab post here.
+    // `_from_pgnsuite` (set only by the tab's render, see SuiteConfig::render())
+    // tells us which one: a tab-originated save redirects back to the tab
+    // (hub §5 contract); the standalone page must Html::back() instead — a
+    // plugin_sac_config-only user (no core config READ) has no route to
+    // Setup > General at all, so redirecting them there would strand them.
+    // getReturnUrl() writes the selected section into the session, so only
+    // call it on the branch that actually redirects.
+    if (!empty($_POST['_from_pgnsuite'])) {
+        Html::redirect(\GlpiPlugin\Pgnsuite\ConfigTab::getReturnUrl('sac'));
+    }
+    Html::back();
 }
 
 // A user with core `config` READ can reach the shared tab directly — send
