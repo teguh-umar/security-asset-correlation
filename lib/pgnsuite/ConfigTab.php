@@ -59,12 +59,24 @@ final class ConfigTab extends CommonGLPI
             $active = array_key_first($sections);
         }
 
+        // Not .nav-pills: its primary-tinted active state (#FEC95C on the default palette)
+        // is unreadable. Core's --glpi-tabs-* variables match GLPI's own vertical tabs in
+        // every palette; the active marker uses the active text color, which each
+        // palette pairs with its active background.
+        echo '<style>'
+            . '.pgnsuite-subnav .nav-link{background:var(--glpi-tabs-bg);color:var(--glpi-tabs-fg);'
+            . 'border:1px solid var(--glpi-tabs-border-color);border-left:5px solid transparent;'
+            . 'border-radius:0;margin-bottom:-1px;text-align:left}'
+            . '.pgnsuite-subnav .nav-link:hover{color:var(--glpi-tabs-active-fg)}'
+            . '.pgnsuite-subnav .nav-link.active{background:var(--glpi-tabs-active-bg);'
+            . 'color:var(--glpi-tabs-active-fg);border-left-color:var(--glpi-tabs-active-fg);font-weight:bold}'
+            . '</style>';
         echo '<div class="row g-3 pgnsuite-config">';
-        echo '<div class="col-12 col-md-3"><div class="nav flex-column nav-pills" role="tablist">';
+        echo '<div class="col-12 col-md-3"><div class="nav flex-column pgnsuite-subnav" role="tablist">';
         foreach ($sections as $key => $section) {
             $is_active = $key === $active;
             echo sprintf(
-                '<button type="button" class="nav-link text-start%s" data-bs-toggle="pill" data-bs-target="#pgnsuite-%s" role="tab" aria-selected="%s"><i class="%s me-2"></i>%s</button>',
+                '<button type="button" class="nav-link%s" data-bs-toggle="pill" data-bs-target="#pgnsuite-%s" role="tab" aria-selected="%s"><i class="%s me-2"></i>%s</button>',
                 $is_active ? ' active' : '',
                 htmlescape($key),
                 $is_active ? 'true' : 'false',
