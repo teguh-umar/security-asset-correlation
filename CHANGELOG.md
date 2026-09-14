@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.2] - 2026-09-14
+
+### Fixed
+
+- **`lib/pgnsuite/ConfigTab.php` was being silently corrupted by
+  `core.autocrlf=true`** — the repo has autocrlf on, which rewrote this
+  file's LF line endings to CRLF not only in the local working-tree
+  checkout but also in `git archive` output, breaking the hub §5
+  byte-identical-copy contract for a file that must match a canonical
+  SHA-256 across every plugin in the suite. Confirmed the corruption
+  reached the actual shipped `sacv1.3.1.zip` (its
+  `sac/lib/pgnsuite/ConfigTab.php` hashed to `57c480c2...` instead of the
+  canonical `89e864d9...`) — **`sacv1.3.1.zip` should not be deployed;
+  use `sacv1.3.2.zip` instead.** The git-committed blob itself was always
+  correct LF (`git show HEAD:...` hashed correctly); the corruption only
+  happened on the way out, on checkout/archive. Fixed with a
+  `.gitattributes` entry marking `lib/pgnsuite/ConfigTab.php -text`, so
+  git never touches its line endings regardless of `core.autocrlf`.
+  Verified via `git archive` from the fixed commit reproducing the
+  canonical hash.
+
 ## [1.3.1] - 2026-09-14
 
 ### Fixed
