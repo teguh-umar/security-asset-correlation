@@ -67,7 +67,7 @@ final class RightDefinition
         global $DB;
         foreach ($DB->request(['FROM' => \Profile::getTable()]) as $profile) {
             $pid          = (int) $profile['id'];
-            $configRight  = (int) ProfileRight::getProfileRight($pid, 'config');
+            $configRight  = self::readProfileRight($pid, 'config');
 
             if (($configRight & UPDATE) !== 0) {
                 ProfileRight::updateProfileRights($pid, $fullAccess);
@@ -90,6 +90,17 @@ final class RightDefinition
         ProfileRight::deleteProfileRights(self::names());
     }
 
+    /**
+     * ProfileRight has no singular getProfileRight() in GLPI 11 core — only
+     * the plural getProfileRights($pid, array $rights): array, keyed by right
+     * name, empty when the profile has no row for it. This wraps that shape.
+     */
+    private static function readProfileRight(int $pid, string $right): int
+    {
+        $rights = ProfileRight::getProfileRights($pid, [$right]);
+        return (int) ($rights[$right] ?? 0);
+    }
+
     /** @return array<string,callable():void> VM-only checks — they touch $DB / ProfileRight. */
     public static function selfChecks(): array
     {
@@ -102,7 +113,7 @@ final class RightDefinition
                 global $DB;
                 $pid = null;
                 foreach ($DB->request(['FROM' => \Profile::getTable()]) as $row) {
-                    $configRight = (int) ProfileRight::getProfileRight((int) $row['id'], 'config');
+                    $configRight = self::readProfileRight((int) $row['id'], 'config');
                     if (($configRight & UPDATE) === 0) {
                         $pid = (int) $row['id'];
                         break;
@@ -110,12 +121,12 @@ final class RightDefinition
                 }
                 sac_assert($pid !== null, 'at least one non-super-admin profile exists to test against');
 
-                $original = (int) ProfileRight::getProfileRight($pid, self::FINDING);
+                $original = self::readProfileRight($pid, self::FINDING);
                 try {
                     // Simulate an admin narrowing the matrix by hand.
                     ProfileRight::updateProfileRights($pid, [self::FINDING => READ]);
                     sac_assert_eq(
-                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        self::readProfileRight($pid, self::FINDING),
                         READ,
                         'right narrowed to READ before re-install'
                     );
@@ -124,7 +135,7 @@ final class RightDefinition
                     self::addOnInstall();
 
                     sac_assert_eq(
-                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        self::readProfileRight($pid, self::FINDING),
                         READ,
                         'narrowed right survives a re-install (no clobber)'
                     );
@@ -140,7 +151,7 @@ final class RightDefinition
                 global $DB;
                 $pid = null;
                 foreach ($DB->request(['FROM' => \Profile::getTable()]) as $row) {
-                    $configRight = (int) ProfileRight::getProfileRight((int) $row['id'], 'config');
+                    $configRight = self::readProfileRight((int) $row['id'], 'config');
                     if (($configRight & UPDATE) !== 0) {
                         $pid = (int) $row['id'];
                         break;
@@ -148,11 +159,11 @@ final class RightDefinition
                 }
                 sac_assert($pid !== null, 'at least one profile holds UPDATE on core config to test against');
 
-                $original = (int) ProfileRight::getProfileRight($pid, self::FINDING);
+                $original = self::readProfileRight($pid, self::FINDING);
                 try {
                     ProfileRight::updateProfileRights($pid, [self::FINDING => READ]);
                     sac_assert_eq(
-                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        self::readProfileRight($pid, self::FINDING),
                         READ,
                         'right narrowed to READ before re-install'
                     );
@@ -160,7 +171,7 @@ final class RightDefinition
                     self::addOnInstall();
 
                     sac_assert_eq(
-                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        self::readProfileRight($pid, self::FINDING),
                         self::ALL[self::FINDING],
                         'super-admin (config UPDATE) always gets the full mask back'
                     );
