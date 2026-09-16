@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.6] - 2026-09-16
+
+### Fixed
+
+- **v1.3.5 called `ProfileRight::getProfileRight()`, which does not exist in
+  GLPI 11 core** — the real API is the plural `getProfileRights($pid,
+  array $rights): array`, keyed by right name, empty when the profile has
+  no row. Every call site would have fataled with "Call to undefined
+  method" on `plugin:install sac --force`, taking the install down with it.
+  **v1.3.5 must not be deployed; production stays on 1.3.4 until this
+  lands.** Caught before any deployment (peer review against GLPI's
+  `11.0/bugfixes` source, `src/ProfileRight.php`) — `php -l` only parses
+  and the offline test suite is pure-logic, so nothing local could catch a
+  wrong core method name; the two new `db/` checks that would have hit it
+  need a VM run to execute at all. Added a private
+  `RightDefinition::readProfileRight()` wrapper around the correct plural
+  API and routed every call site through it. No behavior change from the
+  v1.3.5 design — only the broken API call is fixed.
+
 ## [1.3.5] - 2026-09-16
 
 ### Fixed
