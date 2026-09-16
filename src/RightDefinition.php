@@ -56,22 +56,27 @@ final class RightDefinition
         }
         ProfileRight::addProfileRights($toAdd);
 
-        // Full access for Super-Admin (works even without a session, e.g. a fresh
-        // `plugin:install --force`), filtered through $toAdd like every other
-        // profile below — the easy branch to forget.
-        $fullAccess = array_intersect_key(self::ALL, array_flip($toAdd));
+        // Full access, unfiltered by $toAdd, every run — "Super-Admin selalu
+        // penuh": whoever can administer core config must always be able to
+        // configure this plugin too, even on a `--force` reinstall after an
+        // admin narrowed everyone else's matrix. Identified by capability
+        // (holds UPDATE on core 'config'), never by profile name/id — names
+        // are renameable/localised and id=4 is only the default-install value.
+        $fullAccess = self::ALL;
 
         global $DB;
         foreach ($DB->request(['FROM' => \Profile::getTable()]) as $profile) {
-            $pid = (int) $profile['id'];
-            if ($profile['name'] === 'Super-Admin') {
+            $pid          = (int) $profile['id'];
+            $configRight  = (int) ProfileRight::getProfileRight($pid, 'config');
+
+            if (($configRight & UPDATE) !== 0) {
                 ProfileRight::updateProfileRights($pid, $fullAccess);
                 continue;
             }
-            // Everyone else inherits SAC access from their existing core 'config'
-            // mask, so a read-only profile gets read-only SAC and a no-access
-            // profile gets none.
-            $configRight = (int) ProfileRight::getProfileRight($pid, 'config');
+
+            // Everyone else inherits SAC access from their existing core
+            // 'config' mask (so a read-only profile gets read-only SAC), and
+            // only for rights that don't already exist.
             $seed = [];
             foreach ($toAdd as $right) {
                 $seed[$right] = self::ALL[$right] & $configRight;
@@ -90,10 +95,20 @@ final class RightDefinition
     {
         return [
             'db/rightdefinition-preserves-tuned-matrix' => static function (): void {
+                // Must be a non-super-admin profile: addOnInstall() now always
+                // resets a config-UPDATE profile to full access regardless of
+                // $toAdd, so testing "narrowed value survives" against one
+                // would fail for the right reason but the wrong test.
                 global $DB;
-                $row = $DB->request(['FROM' => \Profile::getTable(), 'LIMIT' => 1])->current();
-                sac_assert($row !== null, 'at least one profile exists to test against');
-                $pid = (int) $row['id'];
+                $pid = null;
+                foreach ($DB->request(['FROM' => \Profile::getTable()]) as $row) {
+                    $configRight = (int) ProfileRight::getProfileRight((int) $row['id'], 'config');
+                    if (($configRight & UPDATE) === 0) {
+                        $pid = (int) $row['id'];
+                        break;
+                    }
+                }
+                sac_assert($pid !== null, 'at least one non-super-admin profile exists to test against');
 
                 $original = (int) ProfileRight::getProfileRight($pid, self::FINDING);
                 try {
@@ -112,6 +127,42 @@ final class RightDefinition
                         (int) ProfileRight::getProfileRight($pid, self::FINDING),
                         READ,
                         'narrowed right survives a re-install (no clobber)'
+                    );
+                } finally {
+                    ProfileRight::updateProfileRights($pid, [self::FINDING => $original]);
+                }
+            },
+
+            'db/rightdefinition-super-admin-always-full' => static function (): void {
+                // A profile with UPDATE on core 'config' must always get the
+                // plugin's full mask, even if it was previously narrowed and
+                // even though the rights already exist (not filtered by $toAdd).
+                global $DB;
+                $pid = null;
+                foreach ($DB->request(['FROM' => \Profile::getTable()]) as $row) {
+                    $configRight = (int) ProfileRight::getProfileRight((int) $row['id'], 'config');
+                    if (($configRight & UPDATE) !== 0) {
+                        $pid = (int) $row['id'];
+                        break;
+                    }
+                }
+                sac_assert($pid !== null, 'at least one profile holds UPDATE on core config to test against');
+
+                $original = (int) ProfileRight::getProfileRight($pid, self::FINDING);
+                try {
+                    ProfileRight::updateProfileRights($pid, [self::FINDING => READ]);
+                    sac_assert_eq(
+                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        READ,
+                        'right narrowed to READ before re-install'
+                    );
+
+                    self::addOnInstall();
+
+                    sac_assert_eq(
+                        (int) ProfileRight::getProfileRight($pid, self::FINDING),
+                        self::ALL[self::FINDING],
+                        'super-admin (config UPDATE) always gets the full mask back'
                     );
                 } finally {
                     ProfileRight::updateProfileRights($pid, [self::FINDING => $original]);
