@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.5] - 2026-09-16
+
+### Fixed
+
+- **Super-Admin detection in `RightDefinition::addOnInstall()` keyed off the
+  profile name, and was still filtered by `$toAdd`** — `$profile['name'] ===
+  'Super-Admin'` breaks if the profile is renamed/localised, and filtering
+  its seed through `$toAdd` meant a `--force` reinstall after rights already
+  existed would never refresh it, risking an instance where nobody can
+  configure the plugin. Per the user's "Super-Admin selalu penuh" directive
+  (hub §4): a profile is now identified by capability — holds `UPDATE` on
+  the core `config` right — and, once identified, always gets the plugin's
+  full mask on every run, unfiltered by `$toAdd`. Every other profile stays
+  `$toAdd`-only exactly as in v1.3.4. If no profile passes the capability
+  test, nothing extra is seeded (no fallback to granting everyone full
+  rights). Added `db/rightdefinition-super-admin-always-full` and adjusted
+  `db/rightdefinition-preserves-tuned-matrix` to target a non-super-admin
+  profile specifically.
+
 ## [1.3.4] - 2026-09-16
 
 ### Fixed
