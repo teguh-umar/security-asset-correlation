@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.4] - 2026-09-16
+
+### Fixed
+
+- **`RightDefinition::addOnInstall()` seeded rights off `$_SESSION` instead of
+  the DB, and re-seeded on every run** (hub §4/§7) — a CLI
+  `plugin:install sac --force` has no session, so a fresh install granted no
+  profile any SAC right; a web reinstall/upgrade re-granted
+  READ|UPDATE|CREATE|PURGE to the installer's profile, silently overwriting
+  any hand-tuned rights matrix. Now computes `$toAdd` (rights not yet in
+  `ProfileRight::getAllPossibleRights()`) and only ever seeds those: once a
+  right exists, re-running `addOnInstall()` is a no-op. Seeding loops every
+  profile from the DB — Super-Admin gets full access, everyone else inherits
+  their existing core `config` mask — so a fresh CLI install seeds
+  Super-Admin correctly with no session involved. Added a VM-only regression
+  test (`db/rightdefinition-preserves-tuned-matrix`) that narrows a right,
+  re-runs `addOnInstall()`, and asserts the narrowed value survives.
+
 ## [1.3.3] - 2026-09-14
 
 ### Fixed
