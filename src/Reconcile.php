@@ -288,7 +288,7 @@ class Reconcile extends \CommonDBTM
 
             'db/reconcile-resolve' => static function (): void {
                 global $DB;
-                $sig = '__sac_selftest_resolve__';
+                $sig = '__sac_st_resolve__'; // signal_type is varchar(20)
                 $key = [
                     'signal_type'  => $sig,
                     'ref_itemtype' => 'Computer',
@@ -327,7 +327,7 @@ class Reconcile extends \CommonDBTM
                 // sweeps every unresolved row of the signal_type it's given, so using a real
                 // namespace here would silently resolve every genuinely-open reconcile row on
                 // a VM run of this selfCheck.
-                $sig  = '__sac_selftest_subid__';
+                $sig  = '__sac_st_subid__'; // signal_type is varchar(20)
                 $osId = 2147480997;
                 try {
                     self::note($sig, 'OperatingSystem', $osId, 100, 'no_mapping', 'v100');

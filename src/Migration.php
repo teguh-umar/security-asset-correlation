@@ -149,7 +149,9 @@ final class Migration
      */
     private static function isUnsignedInt(\DBmysql $DB, string $table, string $field): bool
     {
-        foreach ($DB->listFields($table) as $name => $meta) {
+        // $usecache = false: $DB caches SHOW COLUMNS per table, and \Migration
+        // does not refresh it after an ALTER.
+        foreach ($DB->listFields($table, false) ?: [] as $name => $meta) {
             if ((string) $name !== $field) {
                 continue;
             }
@@ -343,7 +345,8 @@ final class Migration
                     self::migrateEolmapVersionKey($migration, $DB, $t);
                     $migration->executeMigration();
 
-                    sac_assert($DB->fieldExists($t, 'operatingsystemversions_id'), 'operatingsystemversions_id added by the migration');
+                    // Uncached: the fixture assert above primed $DB's column cache.
+                    sac_assert($DB->fieldExists($t, 'operatingsystemversions_id', false), 'operatingsystemversions_id added by the migration');
                     sac_assert(self::isUnsignedInt($DB, $t, 'operatingsystemversions_id'), 'operatingsystemversions_id is unsigned (hub §4 rule 2b -- would have caught the addField(\'integer\',...) bug)');
                     sac_assert(self::keyExists($DB, $t, 'os_ver'), 'os_ver UNIQUE key added by the migration');
                     sac_assert(!self::keyExists($DB, $t, 'os'), 'old os key dropped by the migration');
@@ -379,7 +382,7 @@ final class Migration
                     self::migrateReconcileSubId($migration, $DB, $t);
                     $migration->executeMigration();
 
-                    sac_assert($DB->fieldExists($t, 'ref_subid'), 'ref_subid added by the migration');
+                    sac_assert($DB->fieldExists($t, 'ref_subid', false), 'ref_subid added by the migration');
                     sac_assert(self::isUnsignedInt($DB, $t, 'ref_subid'), 'ref_subid is unsigned (hub §4 rule 2b -- ref_subid does not match the *_id naming pattern, so no name-based audit will ever catch a regression here)');
                     sac_assert(self::keyExists($DB, $t, 'signal_sub'), 'signal_sub UNIQUE key added by the migration');
                     sac_assert(!self::keyExists($DB, $t, 'signal'), 'old signal key dropped by the migration');

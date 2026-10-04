@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.1] - 2026-10-04
+
+Found by the first full `tools/selfcheck.php` run on the VM (55 checks, 5
+failed) — the first run since the tool could boot again in 1.4.0.
+
+### Fixed
+
+- **Super-Admin was not re-granted full SAC rights on an upgrade.**
+  `RightDefinition::addOnInstall()` returned early once both rights existed,
+  so the "Super-Admin selalu penuh" re-grant (suite rule, 2026-09-16) only
+  ever ran on a first install. It now runs on every
+  `plugin:install sac --force`; every other profile is still seeded only for
+  rights created in that run.
+- The Reconcile help text showed a literal `Map &amp; resolve`.
+
+### Fixed (selfcheck only)
+
+- `db/reconcile-resolve` and `db/reconcile-subid-distinct` used fixture
+  `signal_type` values longer than the column (`varchar(20)`).
+- `db/migration-eolmap-key` and `db/migration-reconcile-subid-key` read the
+  column list from `$DB`'s cache, primed before the migration ran.
+  `Migration::isUnsignedInt()` now reads uncached too.
+
 ## [1.4.0] - 2026-10-04
 
 ### Changed

@@ -48,13 +48,14 @@ final class RightDefinition
         // Only ever seed rights that don't exist yet (hub §4): a CLI install has no
         // $_SESSION so it can't key off the "installing profile", and a web
         // reinstall/upgrade must never re-seed a right an admin already tuned by
-        // hand. Once $toAdd is empty, this is a true no-op — every run after the
-        // first leaves the profile matrix exactly as the admin left it.
+        // hand. Once $toAdd is empty, every run after the first leaves the matrix
+        // of every profile except super-admin exactly as the admin left it.
+        // No early return on an empty $toAdd: v1.3.5–v1.4.0 had one, so the
+        // super-admin re-grant below never ran on an upgrade.
         $toAdd = array_diff(self::names(), array_keys(ProfileRight::getAllPossibleRights()));
-        if ($toAdd === []) {
-            return;
+        if ($toAdd !== []) {
+            ProfileRight::addProfileRights($toAdd);
         }
-        ProfileRight::addProfileRights($toAdd);
 
         // Full access, unfiltered by $toAdd, every run — "Super-Admin selalu
         // penuh": whoever can administer core config must always be able to
@@ -77,6 +78,9 @@ final class RightDefinition
             // Everyone else inherits SAC access from their existing core
             // 'config' mask (so a read-only profile gets read-only SAC), and
             // only for rights that don't already exist.
+            if ($toAdd === []) {
+                continue;
+            }
             $seed = [];
             foreach ($toAdd as $right) {
                 $seed[$right] = self::ALL[$right] & $configRight;
