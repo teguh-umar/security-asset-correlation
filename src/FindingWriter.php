@@ -68,8 +68,15 @@ final class FindingWriter
             $input['scope_label'] = Text::clip((string) $input['scope_label']);
         }
 
+        // Never recursive: in this instance a sub-entity is another company, and
+        // a recursive finding would show its host list to every one of them.
+        // Sent on the update path too, so a pre-v1.5.0 recursive row is fixed
+        // the first time the scan re-asserts it.
+        $input['is_recursive'] = 0;
+        $entity = (int) $input['entities_id'];
+
         $f   = new \GlpiPlugin\Riskregister\Finding();
-        $hit = $f->find(['entities_id' => $input['entities_id'], 'code' => $input['code']]);
+        $hit = $f->find(['entities_id' => $entity, 'code' => $input['code']]);
 
         if ($hit) {
             $id = (int) array_key_first($hit);
@@ -91,8 +98,129 @@ final class FindingWriter
         foreach ($extraLinks as $link) {
             self::linkOnce($id, (string) $link['itemtype'], (int) $link['items_id']);
         }
+        self::unlinkForeignComputers($id, $entity);
 
         return $id;
+    }
+
+    /**
+     * Finding_Item ids linking $findingId to a Computer that belongs to
+     * another entity than the finding. Read-only.
+     *
+     * @return array<int,int>
+     */
+    private static function foreignComputerLinks(int $findingId, int $entity): array
+    {
+        global $DB;
+
+        $table = \GlpiPlugin\Riskregister\Finding_Item::getTable();
+        $ids   = [];
+        foreach ($DB->request([
+            'SELECT'     => ["$table.id AS id"],
+            'FROM'       => $table,
+            'INNER JOIN' => [
+                'glpi_computers' => [
+                    'ON' => [
+                        $table           => 'items_id',
+                        'glpi_computers' => 'id',
+                    ],
+                ],
+            ],
+            'WHERE'      => [
+                "$table.plugin_riskregister_findings_id" => $findingId,
+                "$table.itemtype"                        => 'Computer',
+                'glpi_computers.entities_id'             => ['<>', $entity],
+            ],
+        ]) as $row) {
+            $ids[] = (int) $row['id'];
+        }
+        return $ids;
+    }
+
+    /**
+     * Remove the links found by {@see foreignComputerLinks()}, through the
+     * relation's own API. Those assets get (or already have) a finding of
+     * their own in their own entity.
+     */
+    private static function unlinkForeignComputers(int $findingId, int $entity): int
+    {
+        $ids = self::foreignComputerLinks($findingId, $entity);
+        $li  = new \GlpiPlugin\Riskregister\Finding_Item();
+        foreach ($ids as $linkId) {
+            $li->delete(['id' => $linkId], true);
+        }
+        return count($ids);
+    }
+
+    /**
+     * Every finding carrying $code in an entity NOT in $keepEntities stops
+     * being asserted: it is made non-recursive, loses its links to other
+     * entities' Computers and gains a dated cleared note. `$keepEntities = []`
+     * clears the code everywhere. This is also what re-homes a pre-v1.5.0
+     * Root finding: Root keeps the row, its status and its risks, and only
+     * its own assets.
+     *
+     * @param array<int,int> $keepEntities entities whose finding was just upserted
+     */
+    public static function clearExcept(string $code, array $keepEntities, string $why, RunLog $run): void
+    {
+        if (!self::isAvailable()) {
+            return;
+        }
+
+        $f = new \GlpiPlugin\Riskregister\Finding();
+        foreach ($f->find(['code' => $code]) as $id => $row) {
+            $entity = (int) $row['entities_id'];
+            if (in_array($entity, $keepEntities, true)) {
+                continue;
+            }
+            self::unlinkForeignComputers((int) $id, $entity);
+            self::appendClearedNote((int) $id, $row, $why, $run);
+        }
+    }
+
+    /**
+     * One-off report (and, with $apply, repair) over every SAC-written
+     * finding, including the ones no scan asserts any more (Closed,
+     * superseded, cleared). Used by tools/entity_isolate.php.
+     *
+     * @return array<int,array{id:int,code:string,entities_id:int,is_recursive:int,status:string,foreign_links:int,risks:int}>
+     */
+    public static function isolateAll(bool $apply): array
+    {
+        if (!self::isAvailable()) {
+            return [];
+        }
+
+        $f      = new \GlpiPlugin\Riskregister\Finding();
+        $report = [];
+        foreach ($f->find(['assessment_ref' => ['LIKE', 'SAC/%']]) as $id => $row) {
+            $id        = (int) $id;
+            $entity    = (int) $row['entities_id'];
+            $recursive = (int) ($row['is_recursive'] ?? 0);
+            $foreign   = count(self::foreignComputerLinks($id, $entity));
+            $risks     = class_exists(\GlpiPlugin\Riskregister\Risk::class)
+                ? count((new \GlpiPlugin\Riskregister\Risk())->find(['plugin_riskregister_findings_id' => $id]))
+                : 0;
+
+            $report[] = [
+                'id'            => $id,
+                'code'          => (string) $row['code'],
+                'entities_id'   => $entity,
+                'is_recursive'  => $recursive,
+                'status'        => (string) $row['status'],
+                'foreign_links' => $foreign,
+                'risks'         => $risks,
+            ];
+
+            if ($apply) {
+                if ($recursive !== 0) {
+                    $f->update(['id' => $id, 'is_recursive' => 0]);
+                }
+                self::unlinkForeignComputers($id, $entity);
+            }
+        }
+        return $report;
     }
 
     /** Idempotent: add a `Finding_Item` link only if it doesn't already exist. */
@@ -132,38 +260,32 @@ final class FindingWriter
     }
 
     /**
-     * Append a dated "Signal cleared" line to an existing Finding's `content`.
-     * Never touches `status` or `severity`. No-op if the Finding is not found
-     * or riskregister is absent.
+     * Append a dated "Signal cleared" line to an existing Finding's `content`
+     * and make the row non-recursive. Never touches `status` or `severity`.
      *
-     * Idempotent per day: if `content` already contains "Signal cleared on
-     * <today>" the call is a no-op (no update, no counter bump). A same-day
-     * re-run is silent; a genuine re-clear on a later day appends once. This
-     * stops unbounded `content` growth and repeated `glpi_logs` / findings_cleared
-     * inflation when a signal stays cleared across many scans.
+     * One note per clearing: if `content` already carries a "Signal cleared
+     * on" note the call adds nothing (no counter bump). A re-assert rewrites
+     * `content` from scratch, so a note present means "cleared since the last
+     * assert". Until v1.4.x this was only idempotent per day, and a finding
+     * that stayed cleared gained one note per weekly scan; since v1.5.0 a
+     * pre-split Root finding can stay cleared for good, so that would grow
+     * without bound.
      */
-    public static function appendClearedNote(string $code, int $entitiesId, string $why, RunLog $run): void
+    private static function appendClearedNote(int $id, array $row, string $why, RunLog $run): void
     {
-        if (!self::isAvailable()) {
-            return;
-        }
-
-        $f   = new \GlpiPlugin\Riskregister\Finding();
-        $hit = $f->find(['entities_id' => $entitiesId, 'code' => $code]);
-        if (!$hit) {
-            return;
-        }
-
-        $id       = (int) array_key_first($hit);
-        $row      = reset($hit);
+        $f        = new \GlpiPlugin\Riskregister\Finding();
         $existing = (string) ($row['content'] ?? '');
 
-        if (str_contains($existing, 'Signal cleared on ' . date('Y-m-d'))) {
-            return; // already cleared today — nothing to do
+        if (str_contains($existing, 'Signal cleared on ')) {
+            // already cleared — only the recursive flag may still need fixing
+            if ((int) ($row['is_recursive'] ?? 0) !== 0) {
+                $f->update(['id' => $id, 'is_recursive' => 0]);
+            }
+            return;
         }
 
         $note = "\n\n---\nSignal cleared on " . date('Y-m-d') . ': ' . $why;
-        $f->update(['id' => $id, 'content' => $existing . $note]);
+        $f->update(['id' => $id, 'is_recursive' => 0, 'content' => $existing . $note]);
         $run->bump('findings_cleared');
     }
 
@@ -228,6 +350,87 @@ final class FindingWriter
                         $f->delete(['id' => (int) $fid], true);
                     }
                     (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            // VM-only — a pre-v1.5.0 finding (root, recursive, linked to two
+            // entities' Computers) is split: root keeps the row and its own
+            // asset, the other entity gets its own row, nothing stays recursive.
+            'db/writer-entity-split' => static function (): void {
+                if (!self::isAvailable()) {
+                    return;
+                }
+                global $DB;
+                $other = $DB->request([
+                    'SELECT' => ['id'],
+                    'FROM'   => 'glpi_entities',
+                    'WHERE'  => ['id' => ['>', 0]],
+                    'LIMIT'  => 1,
+                ])->current();
+                if (!$other) {
+                    echo "SKIP  db/writer-entity-split — this GLPI has only the root entity\n";
+                    return;
+                }
+                $e2   = (int) $other['id'];
+                $run  = RunLog::begin('selftest');
+                $code = '__SAC_SC_SPLIT__';
+                $base = [
+                    'code'        => $code,
+                    'name'        => 'SAC selfcheck entity split',
+                    'scope_label' => 'selftest',
+                    'severity'    => 'Low',
+                    'status'      => 'Open',
+                ];
+
+                $c0 = (int) (new \Computer())->add(['name' => '__sac_sc_split_root__', 'entities_id' => 0]);
+                $c2 = (int) (new \Computer())->add(['name' => '__sac_sc_split_sub__', 'entities_id' => $e2]);
+                sac_assert($c0 > 0 && $c2 > 0, 'seed computers created');
+
+                $f  = new \GlpiPlugin\Riskregister\Finding();
+                $fi = new \GlpiPlugin\Riskregister\Finding_Item();
+                $linked = static function (int $findingId) use ($fi): array {
+                    $ids = array_map(
+                        static fn (array $l): int => (int) $l['items_id'],
+                        $fi->find(['plugin_riskregister_findings_id' => $findingId, 'itemtype' => 'Computer'])
+                    );
+                    sort($ids);
+                    return array_values($ids);
+                };
+                try {
+                    $old = (int) $f->add(['entities_id' => 0, 'is_recursive' => 1] + $base);
+                    sac_assert($old > 0, 'old-shape finding created');
+                    self::linkOnce($old, 'Computer', $c0);
+                    self::linkOnce($old, 'Computer', $c2);
+
+                    $id0 = self::upsert(['entities_id' => 0] + $base, [$c0], '', $run);
+                    $id2 = self::upsert(['entities_id' => $e2] + $base, [$c2], '', $run);
+                    sac_assert_eq($id0, $old, 'root keeps the existing row');
+                    sac_assert($id2 !== null && $id2 !== $old, 'the other entity gets its own row');
+
+                    $f->getFromDB($old);
+                    sac_assert_eq((int) $f->fields['is_recursive'], 0, 'root row is no longer recursive');
+                    sac_assert_eq($linked($old), [$c0], 'root row keeps only root\'s Computer');
+
+                    $f->getFromDB($id2);
+                    sac_assert_eq((int) $f->fields['entities_id'], $e2, 'new row is in the Computer\'s entity');
+                    sac_assert_eq((int) $f->fields['is_recursive'], 0, 'new row is not recursive');
+                    sac_assert_eq($linked($id2), [$c2], 'new row links only its own entity\'s Computer');
+
+                    self::clearExcept($code, [$e2], 'selftest', $run);
+                    $f->getFromDB($old);
+                    sac_assert(str_contains((string) $f->fields['content'], 'Signal cleared'), 'entity not kept gets the cleared note');
+                    $f->getFromDB($id2);
+                    sac_assert(!str_contains((string) $f->fields['content'], 'Signal cleared'), 'kept entity is left alone');
+                } finally {
+                    foreach (array_keys($f->find(['code' => $code])) as $fid) {
+                        foreach (array_keys($fi->find(['plugin_riskregister_findings_id' => (int) $fid])) as $liid) {
+                            $fi->delete(['id' => (int) $liid], true);
+                        }
+                        $f->delete(['id' => (int) $fid], true);
+                    }
+                    (new \Computer())->delete(['id' => $c0], true);
+                    (new \Computer())->delete(['id' => $c2], true);
+                    $DB->delete('glpi_plugin_sac_run', ['id' => $run->id()]);
                 }
             },
 

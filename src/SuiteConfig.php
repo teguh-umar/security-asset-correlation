@@ -65,23 +65,12 @@ final class SuiteConfig
      */
     public static function render(bool $fromPgnSuite = false): void
     {
-        $values = \Config::getConfigurationValues(Config::CONTEXT);
-
-        $entityCurrent  = (int) ($values['finding_entity'] ?? Config::DEFAULTS['finding_entity']);
-        $entityDropdown = \Entity::dropdown([
-            'name'    => 'finding_entity',
-            'value'   => $entityCurrent,
-            'entity'  => $_SESSION['glpiactive_entity'] ?? 0,
-            'display' => false,
-        ]);
-
         \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/config.html.twig', [
-            'action'          => \Html::getPrefixedUrl('/plugins/sac/front/config.php'),
-            'values'          => $values,
-            'defaults'        => Config::DEFAULTS,
-            'types'           => Config::FIELD_TYPES,
-            'entity_dropdown' => $entityDropdown,
-            'from_pgnsuite'   => $fromPgnSuite,
+            'action'        => \Html::getPrefixedUrl('/plugins/sac/front/config.php'),
+            'values'        => \Config::getConfigurationValues(Config::CONTEXT),
+            'defaults'      => Config::DEFAULTS,
+            'types'         => Config::FIELD_TYPES,
+            'from_pgnsuite' => $fromPgnSuite,
         ]);
     }
 

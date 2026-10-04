@@ -66,7 +66,7 @@ Its job ends at a well-formed `Finding`.
 - **Single integration point** — every Finding write goes through one `FindingWriter` class, guarded by `\Plugin::isPluginActive('riskregister')`. riskregister absent = SAC degrades cleanly, never fatals.
 - **In-process itemtype API** — `Finding->find()` then `->add()` / `->update()`; idempotent upsert on `(entities_id, code)`; `Finding_Item` links per resolved Computer; unresolved hosts → `raw_asset_text`.
 - **Deterministic ≤50-char codes** so weekly re-runs update rather than duplicate.
-- **Single-entity model** — all Findings in `finding_entity` (default Root) with `is_recursive` so sub-entities see them.
+- **Per-entity findings** — the scans run instance-wide, but a Finding is written in the entity of the affected assets, never recursive, and links only that entity's assets. A licence counts for an entity only when it is owned by that entity or is a recursive licence of an ancestor.
 - **CSV export** — `tools/export_findings.php` (CLI-only) dumps all SAC-origin Findings for external evidence.
 
 ### Operator surface
@@ -128,8 +128,6 @@ Assessment → Setup**, or via the `Config` API. Defaults are seeded on install.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `finding_entity` | `0` | Entity emitted `Finding` rows are created in (`0` = Root). |
-| `finding_recursive` | `1` | Create Findings recursive, so a Root Finding is visible to every sub-entity. |
 | `eol_scan_enabled` | `1` | Master switch for the weekly EOL/EOS scan (`cronEolScan`). |
 | `eol_horizon_days` | `365` | Only emit an EOL Finding when end-of-life falls within this many days (past counts as within). |
 | `eol_severity_high_days` | `90` | Days-to-EOL at or below this → severity `High` (negative → `Critical`). |
@@ -267,7 +265,9 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
 3. `riskregister` **v1.1.0+ deployed** so `ImportSupport::categoryIdByName`
    resolves the canonical category names (SAC tolerates a `0` category id, but a
    name drift would silently create a duplicate dropdown row).
-4. Decide `finding_entity` — Root (`0`) vs a dedicated entity.
+4. **v1.5.0 upgrade only** — before the first scan or selfcheck, run
+   `php plugins/sac/tools/entity_isolate.php` (dry run) and read the report;
+   then `--apply`.
 5. `php bin/console migration:timestamps` after install → expect **clean** /
    "Database schema is OK".
 6. Run each cron once via **Setup → Automatic actions → Execute** (NOT
@@ -298,9 +298,8 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
     columns exist (the License candidate query filters on both).
 13. Confirm `DBmysql::quote()` is available in the running build (used by the
     License candidate query's category-exclusion list).
-14. Open **Security Assessment → Setup**, save the form once, and confirm
-    `finding_entity` round-trips as an entity id (renders as an `Entity::dropdown`,
-    not a checkbox).
+14. Open the Security Assessment section of the suite Setup tab, save the form
+    once, and confirm the values round-trip.
 
 ---
 

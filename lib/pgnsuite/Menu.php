@@ -118,7 +118,8 @@ final class Menu extends CommonGLPI
             return;
         }
 
-        echo '<ul class="nav nav-tabs mb-3 pgnsuite-menu-subnav">';
+        // d-print-none: a page's own Print button prints the normal page, sub-nav included.
+        echo '<ul class="nav nav-tabs mb-3 pgnsuite-menu-subnav d-print-none">';
         foreach ($options as $key => $option) {
             $is_active = $key === $current;
             echo sprintf(
