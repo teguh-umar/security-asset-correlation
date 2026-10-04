@@ -6,3 +6,4 @@
 # copy AND in `git archive` output (confirmed: it broke sacv1.3.1.zip, not
 # just the local checkout).
 lib/pgnsuite/ConfigTab.php -text
+lib/pgnsuite/Menu.php -text

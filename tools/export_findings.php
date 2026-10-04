@@ -2,7 +2,9 @@
 // CLI-only. This script has no session/auth; refuse any HTTP invocation.
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
-include(dirname(__DIR__, 3) . '/inc/includes.php');
+// Same bootstrap as tools/selfcheck.php — inc/includes.php loads nothing in GLPI 11.
+require_once dirname(__DIR__, 3) . '/vendor/autoload.php';
+(new \Glpi\Kernel\Kernel())->boot();
 if (!\Plugin::isPluginActive('riskregister')) { fwrite(STDERR, "riskregister inactive\n"); exit(1); }
 $out = $argv[1] ?? 'php://stdout';
 $fh  = fopen($out, 'w');

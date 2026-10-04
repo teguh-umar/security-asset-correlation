@@ -71,7 +71,7 @@ Its job ends at a well-formed `Finding`.
 
 ### Operator surface
 
-- **Own top-level sidebar sector** "Security Assessment" (not buried under Management).
+- **One entry "Security Assessment" in the shared suite sidebar menu** ("ICT Tools"), with a sub-nav between its pages.
 - **Overview** — per-module status cards (last run, counts, open-reconcile count, deep link to the Finding list).
 - **Reconcile queue** — unmapped OS / bad dates / ambiguous publishers, with inline "Map & resolve" and "Resolve" actions.
 - **Scan runs** — last 50 cron runs (module, timing, status, counters) — read-only audit.
@@ -80,7 +80,7 @@ Its job ends at a well-formed `Finding`.
 
 ### Platform / infrastructure
 
-- GLPI 11.0.0–11.9.99, PHP 8.2+, PSR-4 `GlpiPlugin\Sac\`, GPL-3.0-or-later, author "PGN ICT".
+- GLPI 11.0.0–11.9.99, PHP 8.2+, PSR-4 `GlpiPlugin\Sac\`, GPL-3.0-or-later, author "ICT".
 - **5 own tables**: `glpi_plugin_sac_{eolmap, eolcache, commercialpublishers, reconcile, run}` — timestamp-safe DDL, clean install / uninstall.
 - **3 weekly cron tasks**: `EolScan`, `EolCacheRefresh`, `LicenseScan` — registered on install.
 - **Run audit + stale-run recovery** — each scan opens a `_run` row with per-signal counters; orphaned "running" rows are swept to "stale".
@@ -216,7 +216,7 @@ workflow in the UI yet).
 | Tables | `glpi_plugin_sac_{eolmap, eolcache, commercialpublishers, reconcile, run}` |
 | Config context | `plugin:sac` |
 | Rights | `plugin_sac_finding`, `plugin_sac_config` |
-| Menu | own top-level sector `sac` ("Security Assessment") |
+| Menu | entry `sac` ("Security Assessment", `order` 40) in the shared sector `pgnsuite` |
 | Cron | `GlpiPlugin\Sac\Cron` — actions `EolScan`, `EolCacheRefresh`, `LicenseScan` (weekly) |
 
 Part of the PGN ICT GLPI 11 plugin suite (`integrasipaman`, `riskregister`,

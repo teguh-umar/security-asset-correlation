@@ -4,7 +4,7 @@ use GlpiPlugin\Sac\Menu;
 use GlpiPlugin\Sac\Profile as SacProfile;
 use GlpiPlugin\Sac\SuiteConfig;
 
-define('PLUGIN_SAC_VERSION', '1.3.6');
+define('PLUGIN_SAC_VERSION', '1.4.0');
 define('PLUGIN_SAC_MIN_GLPI', '11.0.0');
 define('PLUGIN_SAC_MAX_GLPI', '11.9.99');
 
@@ -13,7 +13,7 @@ function plugin_version_sac(): array
     return [
         'name'         => 'Security-Asset Correlation',
         'version'      => PLUGIN_SAC_VERSION,
-        'author'       => 'PGN ICT',
+        'author'       => 'ICT',
         'license'      => 'GPL-3.0-or-later',
         'homepage'     => '',
         'requirements' => [
@@ -38,13 +38,19 @@ function plugin_init_sac(): void
 
     $PLUGIN_HOOKS['csrf_compliant']['sac'] = true;
 
-    // Own top-level sidebar sector (array-of-classes = new sector).
-    $PLUGIN_HOOKS['menu_toadd']['sac'] = ['sac' => [Menu::class]];
+    // One entry in the shared suite sidebar sector (hub §5 contract). Same
+    // byte-identical-copy rule as ConfigTab below; class_exists(…, false)
+    // skips the autoloader, which would look for a nonexistent plugins/pgnsuite/.
+    if (!class_exists(\GlpiPlugin\Pgnsuite\Menu::class, false)) {
+        require_once __DIR__ . '/lib/pgnsuite/Menu.php';
+    }
+    \GlpiPlugin\Pgnsuite\Menu::register('sac');
+    $PLUGIN_HOOKS[\GlpiPlugin\Pgnsuite\Menu::HOOK]['sac'] = Menu::class . '::entry';
 
     // Rights tab on Profile.
     Plugin::registerClass(SacProfile::class, ['addtabon' => ['Profile']]);
 
-    // Shared "PGN Suite" tab on Setup > General (hub §5 contract). The class
+    // Shared suite tab on Setup > General (hub §5 contract). The class
     // is a byte-identical copy of the canonical file (SHA-256 verified before
     // committing) — never edit lib/pgnsuite/ConfigTab.php on its own; changes
     // go through the canonical copy and get redistributed.

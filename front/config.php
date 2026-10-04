@@ -90,7 +90,8 @@ if (Session::haveRight('config', READ)) {
     Html::redirect(\GlpiPlugin\Pgnsuite\ConfigTab::getReturnUrl('sac'));
 }
 
-Html::header(__('Security Assessment', 'sac'), '', 'sac', 'setup');
+// No option and no sub-nav: this page is not one of the menu entry's options.
+Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac');
 
 SuiteConfig::render();
 

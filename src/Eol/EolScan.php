@@ -138,7 +138,7 @@ final class EolScan
                 'is_recursive' => $recursive,
                 'code'         => $code,
                 'name'         => substr("EOL: $label", 0, 255),
-                'scope_label'  => substr("$label ×$hostCount", 0, 255),
+                'scope_label'  => \GlpiPlugin\Sac\Text::clip("$label ×$hostCount"),
                 'severity'     => $sev,
                 'content'      => "OS: $label\nEnd of life: $date (source: $source)\nAffected hosts:\n"
                     . implode("\n", array_map(fn ($n) => "- $n", $assets['resolved'])),
@@ -351,7 +351,7 @@ final class EolScan
                 'is_recursive' => $recursive,
                 'code'         => Code::eolHw($cid),
                 'name'         => substr("Hardware EOL: $cname", 0, 255),
-                'scope_label'  => substr($cname, 0, 255),
+                'scope_label'  => \GlpiPlugin\Sac\Text::clip($cname),
                 'severity'     => $sev,
                 'content'      => "Hardware EOL: $cname\nWarranty end: $endDate (warranty_date $warrantyDate + "
                     . (int) $c['warranty_duration'] . " months)",
