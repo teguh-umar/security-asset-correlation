@@ -60,8 +60,12 @@ final class FindingWriter
         }
 
         if ($rawAssetText !== '') {
-            // substr (not mb_substr): local PHP has no mbstring. 255 = column width.
-            $input['raw_asset_text'] = substr($rawAssetText, 0, 255);
+            $input['raw_asset_text'] = Text::clip($rawAssetText);
+        }
+        // Last line of defence for the other varchar(255) column: a caller-built
+        // label (a long asset or product list) must never reach MySQL unclipped.
+        if (isset($input['scope_label'])) {
+            $input['scope_label'] = Text::clip((string) $input['scope_label']);
         }
 
         $f   = new \GlpiPlugin\Riskregister\Finding();

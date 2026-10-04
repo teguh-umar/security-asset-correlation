@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.4.0] - 2026-10-04
+
+### Changed
+
+- **One entry in the shared suite sidebar menu ("ICT Tools") instead of an
+  own top-level sector** (hub §7 2026-10-03). "Security Assessment" is now
+  entry `sac` (`order` 40) of sector `pgnsuite`; Overview / Reconcile / Scan
+  runs became its options and are reached through a sub-nav printed under
+  the page header. `GlpiPlugin\Sac\Menu` is now only the provider
+  (`Menu::entry()`), returning null without `plugin_sac_finding` READ. Ships
+  `lib/pgnsuite/Menu.php` r1 and `ConfigTab.php` r4, byte-identical to the
+  canonical copies. **Users must log out and back in after the deploy** (the
+  sidebar is cached in the session).
+- `'author'` is now `'ICT'` (suite decision).
+
+### Fixed
+
+- **`tools/selfcheck.php` and `tools/export_findings.php` could not boot on
+  GLPI 11**: they loaded `inc/includes.php`, which no longer loads anything,
+  so plugin classes were never autoloaded. Both now use
+  `vendor/autoload.php` + `Kernel::boot()`, as core `front/cron.php` does.
+- **Labels written to riskregister were clipped by bytes, not characters.**
+  `substr($s, 0, 255)` could split a multi-byte character ("×", "—") at the
+  boundary and hand MySQL invalid UTF-8. New `Text::clip()` clips on
+  characters; `FindingWriter::upsert()` also clips `scope_label` itself, so
+  no caller can pass an over-long label.
+
 ## [1.3.6] - 2026-09-16
 
 ### Fixed

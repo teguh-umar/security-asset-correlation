@@ -54,7 +54,8 @@ foreach (['eol', 'license', 'eolcache'] as $module) {
     ];
 }
 
-Html::header(__('Security Assessment', 'sac'), '', 'sac', 'overview');
+Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'overview');
+\GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'overview');
 
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/overview.html.twig', [
     'cards'        => $cards,

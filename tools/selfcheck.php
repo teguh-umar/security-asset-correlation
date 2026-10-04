@@ -45,31 +45,32 @@ function sac_assert_eq(mixed $a, mixed $b, string $msg = ''): void
 // --- Bootstrap GLPI --------------------------------------------------------
 // This file lives at <glpi>/plugins/sac/tools/selfcheck.php, so the GLPI root is
 // three levels up. We probe a few candidates and use whichever one actually
-// contains inc/includes.php (GLPI 11's CLI/legacy entrypoint — still referenced
-// by src/Glpi/Kernel/Kernel.php) so the harness keeps working if the plugin is
+// contains vendor/autoload.php so the harness keeps working if the plugin is
 // nested differently (e.g. marketplace/).
 
 $glpiRoot = null;
 foreach ([dirname(__DIR__, 3), dirname(__DIR__, 4), dirname(__DIR__, 2), dirname(__DIR__, 5)] as $candidate) {
-    if (is_file($candidate . '/inc/includes.php')) {
+    if (is_file($candidate . '/vendor/autoload.php') && is_file($candidate . '/src/Glpi/Kernel/Kernel.php')) {
         $glpiRoot = $candidate;
         break;
     }
 }
 
 if ($glpiRoot === null) {
-    fwrite(STDERR, "selfcheck: cannot locate GLPI root (inc/includes.php) from " . __DIR__ . "\n");
+    fwrite(STDERR, "selfcheck: cannot locate GLPI root (vendor/autoload.php) from " . __DIR__ . "\n");
     exit(2);
 }
 
-require $glpiRoot . '/inc/includes.php';
+// Same bootstrap as core front/cron.php (11.0.5): in GLPI 11 inc/includes.php
+// only emits deprecation notices, so nothing was autoloaded and every db/ check
+// died on a missing class. The autoloader + Kernel boot is what loads $DB and
+// the active plugins (their PSR-4 autoloaders and plugin_init_*()).
+require_once $glpiRoot . '/vendor/autoload.php';
+(new \Glpi\Kernel\Kernel())->boot();
 
-// GLPI 11's CLI/legacy bootstrap does NOT auto-load plugins, so the PSR-4
-// autoloader for GlpiPlugin\Sac\ is never registered and every discovered class
-// below would be missing -> "0 checks discovered" false pass.
-// Plugin::load($key, true) registers the autoloader + runs plugin_init_*().
-if (class_exists('\Plugin')) {
-    \Plugin::load('sac', true);
+if (!\Plugin::isPluginActive('sac')) {
+    fwrite(STDERR, "selfcheck: plugin sac is not active\n");
+    exit(2);
 }
 
 // --- Discover the plugin's classes ---------------------------------------
