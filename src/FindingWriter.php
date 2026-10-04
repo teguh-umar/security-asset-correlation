@@ -160,9 +160,14 @@ final class FindingWriter
      * Root finding: Root keeps the row, its status and its risks, and only
      * its own assets.
      *
+     * A finding in an entity outside $scope is not scanned, so nothing is
+     * known about it: it is still made non-recursive and loses foreign links,
+     * but gets no cleared note.
+     *
      * @param array<int,int> $keepEntities entities whose finding was just upserted
+     * @param array<int,int>|null $scope {@see Config::scanScope()}; null = every entity
      */
-    public static function clearExcept(string $code, array $keepEntities, string $why, RunLog $run): void
+    public static function clearExcept(string $code, array $keepEntities, string $why, RunLog $run, ?array $scope = null): void
     {
         if (!self::isAvailable()) {
             return;
@@ -175,6 +180,12 @@ final class FindingWriter
                 continue;
             }
             self::unlinkForeignComputers((int) $id, $entity);
+            if ($scope !== null && !in_array($entity, $scope, true)) {
+                if ((int) ($row['is_recursive'] ?? 0) !== 0) {
+                    $f->update(['id' => (int) $id, 'is_recursive' => 0]);
+                }
+                continue;
+            }
             self::appendClearedNote((int) $id, $row, $why, $run);
         }
     }

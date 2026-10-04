@@ -60,6 +60,7 @@ Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SE
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/overview.html.twig', [
     'cards'        => $cards,
     'riskregister' => $riskregister,
+    'summary'      => \GlpiPlugin\Sac\Summary::build(),
 ]);
 
 Html::footer();

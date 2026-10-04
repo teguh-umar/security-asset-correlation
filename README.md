@@ -128,6 +128,8 @@ Assessment → Setup**, or via the `Config` API. Defaults are seeded on install.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `scan_entities` | `[]` | Entity ids the scans cover; empty = every entity. |
+| `scan_entities_recursive` | `1` | Also scan the child entities of the selected ones. |
 | `eol_scan_enabled` | `1` | Master switch for the weekly EOL/EOS scan (`cronEolScan`). |
 | `eol_horizon_days` | `365` | Only emit an EOL Finding when end-of-life falls within this many days (past counts as within). |
 | `eol_severity_high_days` | `90` | Days-to-EOL at or below this → severity `High` (negative → `Critical`). |

@@ -17,6 +17,22 @@
   entities" on. A group-wide licence is one on Root, recursive.
 - Settings `finding_entity` and `finding_recursive` are removed (stored
   values are deleted on install).
+
+### Added
+
+- **Entities to scan** (`scan_entities`, `scan_entities_recursive`): limit
+  the scans to selected entities, with or without their child entities.
+  Empty means every entity. Findings of an entity that is no longer scanned
+  are kept as they are (no cleared note).
+- **Overview: open findings by entity, and the signals affecting the most
+  hosts.** Both read riskregister's findings through core's entity
+  restriction, so a subsidiary's user sees its own entity only and a
+  group-level user sees every entity plus the total.
+- **Setup page redesigned**: three cards (Scan scope, End of life, License
+  governance) with labels, hints and units instead of a table of raw keys;
+  read-only for a profile without the UPDATE right.
+
+### Also changed
 - Shared `lib/pgnsuite/Menu.php` r2 (the sub-nav is hidden when printing).
 
 ### Existing findings

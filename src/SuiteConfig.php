@@ -65,12 +65,28 @@ final class SuiteConfig
      */
     public static function render(bool $fromPgnSuite = false): void
     {
+        $canedit = \Session::haveRight('plugin_sac_config', UPDATE);
+
+        // 'value', not 'values': for multiple, Dropdown::show() copies value
+        // into values (11.0.5; suite gotcha found by opmanager).
+        $entityDropdown = \Entity::dropdown([
+            'name'     => 'scan_entities[]',
+            'multiple' => true,
+            'value'    => Config::scanEntities(),
+            'width'    => '100%',
+            'readonly' => !$canedit,
+            'display'  => false,
+        ]);
+
         \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/config.html.twig', [
-            'action'        => \Html::getPrefixedUrl('/plugins/sac/front/config.php'),
-            'values'        => \Config::getConfigurationValues(Config::CONTEXT),
-            'defaults'      => Config::DEFAULTS,
-            'types'         => Config::FIELD_TYPES,
-            'from_pgnsuite' => $fromPgnSuite,
+            'action'          => \Html::getPrefixedUrl('/plugins/sac/front/config.php'),
+            'values'          => \Config::getConfigurationValues(Config::CONTEXT),
+            'defaults'        => Config::DEFAULTS,
+            'types'           => Config::FIELD_TYPES,
+            'sections'        => Config::sections(),
+            'entity_dropdown' => $entityDropdown,
+            'canedit'         => $canedit,
+            'from_pgnsuite'   => $fromPgnSuite,
         ]);
     }
 

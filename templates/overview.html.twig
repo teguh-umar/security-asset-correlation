@@ -101,6 +101,98 @@
 {% endif %}
 </div>
 
+{#
+ # `summary` = Summary::build(): open SAC findings the user may see, per
+ # entity (+ total) and per signal across entities. Plain numbers, no
+ # coloured count badges (suite rule).
+ #}
+{% if summary is not null %}
+{% set severities = ['Critical', 'High', 'Medium', 'Low'] %}
+<div class="row row-cards mt-1">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">{{ __('Open findings by entity', 'sac') }}</h3>
+            </div>
+            {% if summary.entities is empty %}
+                <div class="card-body text-center text-muted">{{ __('No open findings', 'sac') }}</div>
+            {% else %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>{{ __('Entity', 'sac') }}</th>
+                            <th class="text-end">{{ __('EOL / EOS', 'sac') }}</th>
+                            <th class="text-end">{{ __('License', 'sac') }}</th>
+                            {% for s in severities %}<th class="text-end">{{ s }}</th>{% endfor %}
+                            <th class="text-end">{{ __('Hosts', 'sac') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for e in summary.entities %}
+                        <tr>
+                            <td>{{ e.name }}</td>
+                            <td class="text-end">{{ e.eol }}</td>
+                            <td class="text-end">{{ e.license }}</td>
+                            {% for s in severities %}
+                                <td class="text-end{{ e[s] == 0 ? ' text-muted' : '' }}">{{ e[s] }}</td>
+                            {% endfor %}
+                            <td class="text-end">{{ e.hosts }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                    {% if summary.entities|length > 1 %}
+                    <tfoot>
+                        <tr class="fw-bold">
+                            <td>{{ __('All entities shown', 'sac') }}</td>
+                            <td class="text-end">{{ summary.total.eol }}</td>
+                            <td class="text-end">{{ summary.total.license }}</td>
+                            {% for s in severities %}<td class="text-end">{{ summary.total[s] }}</td>{% endfor %}
+                            <td class="text-end">{{ summary.total.hosts }}</td>
+                        </tr>
+                    </tfoot>
+                    {% endif %}
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">{{ __('Signals affecting the most hosts', 'sac') }}</h3>
+            </div>
+            {% if summary.signals is empty %}
+                <div class="card-body text-center text-muted">{{ __('No open findings', 'sac') }}</div>
+            {% else %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>{{ __('Signal', 'sac') }}</th>
+                            <th>{{ __('Severity', 'sac') }}</th>
+                            <th class="text-end">{{ __('Entities', 'sac') }}</th>
+                            <th class="text-end">{{ __('Hosts', 'sac') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for sig in summary.signals %}
+                        <tr>
+                            <td>{{ sig.name }}<div class="text-muted small">{{ sig.code }}</div></td>
+                            <td>{{ sig.severity }}</td>
+                            <td class="text-end">{{ sig.entities }}</td>
+                            <td class="text-end">{{ sig.hosts }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% if not riskregister %}
     <div class="alert alert-warning mt-3">
         {{ __('The riskregister plugin is not active — findings are not being written.', 'sac') }}

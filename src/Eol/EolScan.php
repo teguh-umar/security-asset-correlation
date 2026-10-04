@@ -50,6 +50,7 @@ final class EolScan
         // riskregister looks a category up by name alone; the entity is only
         // used if it has to create one, and a shared category belongs to root.
         $obsolescenceCatId = FindingWriter::categoryId('Obsolescence', 0);
+        $scope = Config::scanScope(); // null = every entity
 
         /** @var array<int,string> composite reconcile keys seen this run */
         $seen = [];
@@ -114,20 +115,20 @@ final class EolScan
 
             // One finding per entity that has an affected host, linking only
             // that entity's hosts (suite entity rule).
-            $byEntity = AssetResolver::groupByEntity(AssetResolver::computersForOsVersion($osId, $verId));
+            $byEntity = AssetResolver::groupByEntity(AssetResolver::computersForOsVersion($osId, $verId), $scope);
 
             // The pair still has an inventory row, but every Computer carrying
-            // it is trashed / a template. Treat as "no longer in live
-            // inventory" (spec §4.5) — clear any prior Finding and stop
-            // re-asserting.
+            // it (in the scanned entities) is trashed / a template. Treat as
+            // "no longer in live inventory" (spec §4.5) — clear any prior
+            // Finding and stop re-asserting.
             if ($byEntity === []) {
-                FindingWriter::clearExcept($code, [], 'pair not in live inventory', $run);
+                FindingWriter::clearExcept($code, [], 'pair not in live inventory', $run, $scope);
                 $run->bump('scanned');
                 continue;
             }
 
             if ($sev === null) {
-                FindingWriter::clearExcept($code, [], 'EOL beyond horizon', $run);
+                FindingWriter::clearExcept($code, [], 'EOL beyond horizon', $run, $scope);
                 $run->bump('scanned');
                 continue;
             }
@@ -149,7 +150,7 @@ final class EolScan
 
                 FindingWriter::upsert($input, array_keys($hosts), '', $run);
             }
-            FindingWriter::clearExcept($code, array_keys($byEntity), 'no affected host left in this entity', $run);
+            FindingWriter::clearExcept($code, array_keys($byEntity), 'no affected host left in this entity', $run, $scope);
             $run->bump('scanned');
         }
 
@@ -160,7 +161,7 @@ final class EolScan
             // A hardware-pass failure (schema drift, strict-mode date) must not
             // fail the whole EOL run — the OS pass above already stands.
             try {
-                self::runHardware($run, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
+                self::runHardware($run, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId, $scope);
             } catch (\Throwable $e) {
                 $run->bump('errors');
                 \Toolbox::logInFile('sac', 'EolScan hardware pass: ' . $e->getMessage() . "\n");
@@ -293,7 +294,7 @@ final class EolScan
      * @param int $hwHorizonDays  hoisted `eol_hardware_horizon_days` (I7)
      * @param int $catId          hoisted Obsolescence category id (I7)
      */
-    private static function runHardware(RunLog $run, int $hwHorizonDays, int $catId): void
+    private static function runHardware(RunLog $run, int $hwHorizonDays, int $catId, ?array $scope): void
     {
         global $DB;
 
@@ -330,6 +331,9 @@ final class EolScan
         ]) as $c) {
             $cid          = (int) $c['id'];
             $entity       = (int) $c['entities_id']; // the finding lives where the asset lives
+            if ($scope !== null && !in_array($entity, $scope, true)) {
+                continue; // entity not scanned
+            }
             $cname        = (string) ($c['name'] ?? '');
             $warrantyDate = (string) $c['warranty_date'];
 
@@ -364,7 +368,7 @@ final class EolScan
             ];
 
             FindingWriter::upsert($input, [$cid], '', $run);
-            FindingWriter::clearExcept(Code::eolHw($cid), [$entity], 'asset belongs to another entity', $run);
+            FindingWriter::clearExcept(Code::eolHw($cid), [$entity], 'asset belongs to another entity', $run, $scope);
             $run->bump('scanned');
         }
     }
