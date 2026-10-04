@@ -73,6 +73,13 @@ if (!\Plugin::isPluginActive('sac')) {
     exit(2);
 }
 
+// The db/eol-* and db/lic-* checks seed their Computers in the root entity and
+// run the real scans, which honour the "Entities to scan" setting.
+$scanScope = \GlpiPlugin\Sac\Config::scanScope();
+if ($scanScope !== null && !in_array(0, $scanScope, true)) {
+    echo "NOTE  the root entity is not in \"Entities to scan\": the db/eol-* and db/lic-* checks will fail\n";
+}
+
 // --- Discover the plugin's classes ---------------------------------------
 // Walk src/**/*.php and require_once each file, then keep every declared class
 // in the GlpiPlugin\Sac\ namespace that exposes a selfChecks() method.

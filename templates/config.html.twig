@@ -1,65 +1,73 @@
 {#
- # SAC — configuration screen.
- # Autoescape is ON and there is no |raw.
+ # SAC — configuration screen: one card per section of Config::sections().
+ # Autoescape is ON. The ONLY |raw is `entity_dropdown` — framework-generated
+ # markup from PHP `Entity::dropdown()`, never plugin data.
  # The widget for each key is driven by `types[key]` (Config::FIELD_TYPES),
  # never inferred from the default value.
  #}
-<div class="card">
-    <div class="card-body">
-        <h3 class="card-title">{{ __('Security Assessment setup', 'sac') }}</h3>
+<form method="post" action="{{ action }}">
+    <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+    {% if from_pgnsuite %}
+        {# Tells front/config.php's POST handler this save came from the
+         # shared suite tab, so it should redirect back there (hub §5
+         # contract) instead of Html::back() — the standalone page (this same
+         # template, from_pgnsuite unset) must never redirect there: a
+         # plugin_sac_config-only user has no route to Setup > General at all. #}
+        <input type="hidden" name="_from_pgnsuite" value="1">
+    {% endif %}
 
-        <form method="post" action="{{ action }}">
-            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
-            {% if from_pgnsuite %}
-                {# Tells front/config.php's POST handler this save came from the
-                 # shared PGN Suite tab, so it should redirect back there
-                 # (hub §5 contract) instead of Html::back() — the standalone
-                 # page (this same template, from_pgnsuite unset) must never
-                 # redirect there: a plugin_sac_config-only user has no route
-                 # to Setup > General at all. #}
-                <input type="hidden" name="_from_pgnsuite" value="1">
+    {% for section in sections %}
+    <div class="card mb-3">
+        <div class="card-header">
+            <h3 class="card-title"><i class="{{ section.icon }} me-2"></i>{{ section.title }}</h3>
+        </div>
+        <div class="card-body">
+            {% if section.hint %}
+                <p class="text-muted">{{ section.hint }}</p>
             {% endif %}
-
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>{{ __('Setting', 'sac') }}</th>
-                        <th>{{ __('Value', 'sac') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for key, default in defaults %}
-                    {% set current = values[key] is defined ? values[key] : default %}
-                    {% set type = types[key] is defined ? types[key] : 'text' %}
-                    <tr>
-                        <td><label for="sac_{{ key }}">{{ key }}</label></td>
-                        <td>
-                        {% if type == 'bool' %}
-                            <input type="hidden" name="{{ key }}" value="0">
-                            <input type="checkbox" id="sac_{{ key }}" name="{{ key }}" value="1"
-                                   {{ current in [1, '1'] ? 'checked' : '' }}>
-                        {% elseif type == 'int' %}
-                            <input type="number" id="sac_{{ key }}" name="{{ key }}"
-                                   class="form-control" value="{{ current }}" min="0" step="1">
-                        {% elseif type == 'json' %}
-                            <input type="text" id="sac_{{ key }}" name="{{ key }}"
-                                   class="form-control" value="{{ current }}">
-                            <small class="form-text text-muted">
-                                {{ __('Must be a JSON array, e.g. ["system_component"]', 'sac') }}
-                            </small>
-                        {% else %}
-                            <input type="text" id="sac_{{ key }}" name="{{ key }}"
-                                   class="form-control" value="{{ current }}">
+            <div class="row g-3">
+            {% for key, field in section.fields %}
+                {% set current = values[key] is defined ? values[key] : defaults[key] %}
+                {% set type = types[key] is defined ? types[key] : 'text' %}
+                <div class="{{ type in ['entities', 'json'] ? 'col-12' : 'col-md-6' }}">
+                {% if type == 'bool' %}
+                    <input type="hidden" name="{{ key }}" value="0">
+                    <label class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="sac_{{ key }}" name="{{ key }}" value="1"
+                               {{ current in [1, '1'] ? 'checked' : '' }} {{ canedit ? '' : 'disabled' }}>
+                        <span class="form-check-label">{{ field.label }}</span>
+                    </label>
+                {% elseif type == 'int' %}
+                    <label class="form-label" for="sac_{{ key }}">{{ field.label }}</label>
+                    <div class="input-group">
+                        <input type="number" id="sac_{{ key }}" name="{{ key }}" class="form-control"
+                               value="{{ current }}" min="0" step="1" {{ canedit ? '' : 'disabled' }}>
+                        {% if field.unit is defined %}
+                            <span class="input-group-text">{{ field.unit }}</span>
                         {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-
-            <button type="submit" name="update" value="1" class="btn btn-primary">
-                {{ __('Save', 'sac') }}
-            </button>
-        </form>
+                    </div>
+                {% elseif type == 'entities' %}
+                    <label class="form-label">{{ field.label }}</label>
+                    <input type="hidden" name="{{ key }}" value="">
+                    {{ entity_dropdown|raw }}
+                {% else %}
+                    <label class="form-label" for="sac_{{ key }}">{{ field.label }}</label>
+                    <input type="text" id="sac_{{ key }}" name="{{ key }}" class="form-control"
+                           value="{{ current }}" {{ canedit ? '' : 'disabled' }}>
+                {% endif %}
+                {% if field.hint %}
+                    <div class="form-hint">{{ field.hint }}</div>
+                {% endif %}
+                </div>
+            {% endfor %}
+            </div>
+        </div>
     </div>
-</div>
+    {% endfor %}
+
+    {% if canedit %}
+        <button type="submit" name="update" value="1" class="btn btn-primary">
+            <i class="ti ti-device-floppy me-1"></i>{{ __('Save', 'sac') }}
+        </button>
+    {% endif %}
+</form>

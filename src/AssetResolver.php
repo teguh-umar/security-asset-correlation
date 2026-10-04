@@ -106,13 +106,18 @@ final class AssetResolver
      * (suite entity rule: entities are separate companies).
      *
      * @param array{resolved:array<int,string>,entities?:array<int,int>} $assets
+     * @param array<int,int>|null $scope entities to keep ({@see Config::scanScope()}); null = all
      * @return array<int,array<int,string>> [entities_id => [computers_id => name]], entity ascending
      */
-    public static function groupByEntity(array $assets): array
+    public static function groupByEntity(array $assets, ?array $scope = null): array
     {
         $out = [];
         foreach ($assets['resolved'] as $cid => $name) {
-            $out[(int) ($assets['entities'][$cid] ?? 0)][(int) $cid] = (string) $name;
+            $entity = (int) ($assets['entities'][$cid] ?? 0);
+            if ($scope !== null && !in_array($entity, $scope, true)) {
+                continue;
+            }
+            $out[$entity][(int) $cid] = (string) $name;
         }
         ksort($out);
         return $out;
@@ -185,6 +190,8 @@ final class AssetResolver
                 ]);
                 sac_assert_eq($out, [0 => [3 => 'a'], 2 => [7 => 'c', 5 => 'b']], 'one bucket per entity, entity ascending');
                 sac_assert_eq(self::groupByEntity(['resolved' => []]), [], 'no assets, no buckets');
+                $scoped = self::groupByEntity(['resolved' => [3 => 'a', 5 => 'b'], 'entities' => [3 => 0, 5 => 2]], [2]);
+                sac_assert_eq($scoped, [2 => [5 => 'b']], 'an entity outside the scan scope is dropped');
             },
             'db/os-computers' => static function (): void {
                 global $DB;

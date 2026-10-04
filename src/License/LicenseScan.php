@@ -43,6 +43,7 @@ final class LicenseScan
         // riskregister looks a category up by name alone; root is only where a
         // missing one would be created.
         $licenseCatId = FindingWriter::categoryId('License Compliance', 0);
+        $scope = Config::scanScope(); // null = every entity
 
         /** @var array<int,array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>>> [entity][publisher][] */
         $byPub = [];
@@ -53,9 +54,9 @@ final class LicenseScan
             $swName = (string) ($sw['name'] ?? '');
             $mid    = (int) ($sw['manufacturers_id'] ?? 0);
 
-            $assets = AssetResolver::computersForSoftware($sid);
-            if ($assets['count'] === 0) {
-                continue;
+            $groups = AssetResolver::groupByEntity(AssetResolver::computersForSoftware($sid), $scope);
+            if ($groups === []) {
+                continue; // not installed anywhere in the scanned entities
             }
             $run->bump('scanned');
 
@@ -64,7 +65,7 @@ final class LicenseScan
             // GLPI would show it there (see licenseAggregate()).
             $overEntities = [];
             $anyLicense   = false;
-            foreach (AssetResolver::groupByEntity($assets) as $entity => $hostsById) {
+            foreach ($groups as $entity => $hostsById) {
                 $installs   = count($hostsById);
                 $lic        = self::licenseAggregate($sid, $entity);
                 $hasLicense = $lic['n'] > 0;
@@ -124,7 +125,7 @@ final class LicenseScan
             // over-deployment Finding in every entity that is not over now.
             // When 2b is off we never asserted one, so there is nothing to clear.
             if ($checkOver && $anyLicense) {
-                FindingWriter::clearExcept(Code::licOver($sid), $overEntities, 'no longer over-deployed', $run);
+                FindingWriter::clearExcept(Code::licOver($sid), $overEntities, 'no longer over-deployed', $run, $scope);
             }
           } catch (\Throwable $e) {
             // One bad software row must not abort the whole scan.
@@ -133,7 +134,7 @@ final class LicenseScan
           }
         }
 
-        self::emitMissingLicenceFindings($byPub, $commercial, $licenseCatId, $run);
+        self::emitMissingLicenceFindings($byPub, $commercial, $licenseCatId, $run, $scope);
     }
 
     /**
@@ -149,7 +150,8 @@ final class LicenseScan
         array $byPub,
         array $commercial,
         int $licenseCatId,
-        RunLog $run
+        RunLog $run,
+        ?array $scope
     ): void {
         $prodThreshold    = (int) Config::get('license_2a_products_threshold');
         $installThreshold = (int) Config::get('license_2a_installs_threshold');
@@ -207,7 +209,7 @@ final class LicenseScan
 
         foreach ($commercial as $mid) {
             $mid = (int) $mid;
-            FindingWriter::clearExcept(Code::licMissing($mid), $asserted[$mid] ?? [], 'all products now licensed', $run);
+            FindingWriter::clearExcept(Code::licMissing($mid), $asserted[$mid] ?? [], 'all products now licensed', $run, $scope);
         }
     }
 

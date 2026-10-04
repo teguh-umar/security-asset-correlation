@@ -34,6 +34,13 @@ if (isset($_POST['update'])) {
                 $save[$k] = (string) (int) $v;
                 break;
 
+            case 'entities':
+                // The select posts `scan_entities[]`; with nothing selected only
+                // the hidden empty `scan_entities` arrives, which means "all".
+                $ids = is_array($v) ? array_filter($v, static fn ($id): bool => ctype_digit((string) $id)) : [];
+                $save[$k] = json_encode(array_values(array_unique(array_map('intval', $ids))));
+                break;
+
             case 'json':
                 $decoded = json_decode((string) $v, true);
                 if (!is_array($decoded)) {
