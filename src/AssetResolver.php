@@ -61,16 +61,19 @@ final class AssetResolver
      * 2026-09-10-eol-multidim-design.md §7.1). `verId = 0` is a legal,
      * distinct bucket ("version dimension not set/known").
      *
-     * @return array{resolved:array<int,string>,unresolved:array<int,string>}
+     * @return array{resolved:array<int,string>,unresolved:array<int,string>,entities:array<int,int>}
+     *         `entities` is [computers_id => entities_id], see {@see groupByEntity()}.
      */
     public static function computersForOsVersion(int $osId, int $verId): array
     {
         global $DB;
         $resolved = [];
+        $entities = [];
         foreach ($DB->request([
             'SELECT'     => [
                 'glpi_computers.id AS id',
                 'glpi_computers.name AS name',
+                'glpi_computers.entities_id AS entities_id',
             ],
             'DISTINCT'   => true,
             'FROM'       => 'glpi_items_operatingsystems',
@@ -91,25 +94,47 @@ final class AssetResolver
             ],
         ]) as $row) {
             $resolved[(int) $row['id']] = (string) $row['name'];
+            $entities[(int) $row['id']] = (int) $row['entities_id'];
         }
 
-        return ['resolved' => $resolved, 'unresolved' => []];
+        return ['resolved' => $resolved, 'unresolved' => [], 'entities' => $entities];
+    }
+
+    /**
+     * PURE. Split a resolver result by the entity each Computer belongs to.
+     * A finding is written per entity and links only that entity's assets
+     * (suite entity rule: entities are separate companies).
+     *
+     * @param array{resolved:array<int,string>,entities?:array<int,int>} $assets
+     * @return array<int,array<int,string>> [entities_id => [computers_id => name]], entity ascending
+     */
+    public static function groupByEntity(array $assets): array
+    {
+        $out = [];
+        foreach ($assets['resolved'] as $cid => $name) {
+            $out[(int) ($assets['entities'][$cid] ?? 0)][(int) $cid] = (string) $name;
+        }
+        ksort($out);
+        return $out;
     }
 
     /**
      * Computers with any version of the given Software installed.
      *
-     * @return array{count:int,resolved:array<int,string>}
-     *         `resolved` is [computers_id => name]; `count` is its size.
+     * @return array{count:int,resolved:array<int,string>,entities:array<int,int>}
+     *         `resolved` is [computers_id => name]; `count` is its size;
+     *         `entities` is [computers_id => entities_id].
      */
     public static function computersForSoftware(int $softwareId): array
     {
         global $DB;
         $resolved = [];
+        $entities = [];
         foreach ($DB->request([
             'SELECT'     => [
                 'glpi_computers.id AS id',
                 'glpi_computers.name AS name',
+                'glpi_computers.entities_id AS entities_id',
             ],
             'DISTINCT'   => true,
             'FROM'       => 'glpi_items_softwareversions',
@@ -136,9 +161,10 @@ final class AssetResolver
             ],
         ]) as $row) {
             $resolved[(int) $row['id']] = (string) $row['name'];
+            $entities[(int) $row['id']] = (int) $row['entities_id'];
         }
 
-        return ['count' => count($resolved), 'resolved' => $resolved];
+        return ['count' => count($resolved), 'resolved' => $resolved, 'entities' => $entities];
     }
 
     /** Distinct Computer count with the given Software installed. */
@@ -151,6 +177,15 @@ final class AssetResolver
     public static function selfChecks(): array
     {
         return [
+            // PURE — runs in tools/offline-selfcheck.php
+            'assets/group-by-entity' => static function (): void {
+                $out = self::groupByEntity([
+                    'resolved' => [7 => 'c', 3 => 'a', 5 => 'b'],
+                    'entities' => [7 => 2, 3 => 0, 5 => 2],
+                ]);
+                sac_assert_eq($out, [0 => [3 => 'a'], 2 => [7 => 'c', 5 => 'b']], 'one bucket per entity, entity ascending');
+                sac_assert_eq(self::groupByEntity(['resolved' => []]), [], 'no assets, no buckets');
+            },
             'db/os-computers' => static function (): void {
                 global $DB;
                 // Create via ->add() and capture the generated ids — never

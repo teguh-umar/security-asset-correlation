@@ -82,11 +82,13 @@ final class EolCache
             $body = \GlpiPlugin\Sac\Http::get('https://endoflife.date/api/' . rawurlencode($product) . '.json');
             if ($body === null) {
                 $run->bump('errors');
+                \Toolbox::logInFile('sac', "EolCache: no response from endoflife.date for product '$product'\n");
                 continue;
             }
             $data = json_decode($body, true);
             if (!is_array($data)) {
                 $run->bump('errors');
+                \Toolbox::logInFile('sac', "EolCache: endoflife.date answer for product '$product' is not JSON\n");
                 continue;
             }
             foreach ($data as $entry) {

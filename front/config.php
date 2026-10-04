@@ -34,18 +34,6 @@ if (isset($_POST['update'])) {
                 $save[$k] = (string) (int) $v;
                 break;
 
-            case 'entity':
-                if (!ctype_digit((string) $v)) {
-                    Session::addMessageAfterRedirect(
-                        sprintf(__('Invalid value for %s — expected an entity id', 'sac'), $k),
-                        false,
-                        ERROR
-                    );
-                    break;
-                }
-                $save[$k] = (string) (int) $v;
-                break;
-
             case 'json':
                 $decoded = json_decode((string) $v, true);
                 if (!is_array($decoded)) {

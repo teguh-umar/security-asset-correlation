@@ -42,15 +42,14 @@ final class EolScan
 
     public static function run(RunLog $run): void
     {
-        $entity    = (int) Config::get('finding_entity');
-        $recursive = (int) Config::get('finding_recursive');
-
         // Hoist per-run-stable lookups out of the pair loop (I7): the severity
         // thresholds and the Obsolescence category id do not change within a run.
         $horizonDays = (int) Config::get('eol_horizon_days');
         $highDays    = (int) Config::get('eol_severity_high_days');
         $mediumDays  = (int) Config::get('eol_severity_medium_days');
-        $obsolescenceCatId = FindingWriter::categoryId('Obsolescence', $entity);
+        // riskregister looks a category up by name alone; the entity is only
+        // used if it has to create one, and a shared category belongs to root.
+        $obsolescenceCatId = FindingWriter::categoryId('Obsolescence', 0);
 
         /** @var array<int,string> composite reconcile keys seen this run */
         $seen = [];
@@ -113,41 +112,44 @@ final class EolScan
             $days = (int) floor((strtotime($date) - strtotime('today')) / 86400);
             $sev  = Severity::forEolDays($days, $horizonDays, $highDays, $mediumDays);
 
-            $assets    = AssetResolver::computersForOsVersion($osId, $verId);
-            $hostCount = count($assets['resolved']);
+            // One finding per entity that has an affected host, linking only
+            // that entity's hosts (suite entity rule).
+            $byEntity = AssetResolver::groupByEntity(AssetResolver::computersForOsVersion($osId, $verId));
 
             // The pair still has an inventory row, but every Computer carrying
             // it is trashed / a template. Treat as "no longer in live
             // inventory" (spec §4.5) — clear any prior Finding and stop
             // re-asserting.
-            if ($hostCount === 0) {
-                FindingWriter::appendClearedNote($code, $entity, 'pair not in live inventory', $run);
+            if ($byEntity === []) {
+                FindingWriter::clearExcept($code, [], 'pair not in live inventory', $run);
                 $run->bump('scanned');
                 continue;
             }
 
             if ($sev === null) {
-                FindingWriter::appendClearedNote($code, $entity, 'EOL beyond horizon', $run);
+                FindingWriter::clearExcept($code, [], 'EOL beyond horizon', $run);
                 $run->bump('scanned');
                 continue;
             }
 
             $label = trim("$osName $verName");
-            $input = [
-                'entities_id'  => $entity,
-                'is_recursive' => $recursive,
-                'code'         => $code,
-                'name'         => substr("EOL: $label", 0, 255),
-                'scope_label'  => \GlpiPlugin\Sac\Text::clip("$label ×$hostCount"),
-                'severity'     => $sev,
-                'content'      => "OS: $label\nEnd of life: $date (source: $source)\nAffected hosts:\n"
-                    . implode("\n", array_map(fn ($n) => "- $n", $assets['resolved'])),
-                'assessment_ref' => 'SAC/eol',
-                'plugin_riskregister_riskcategories_id' => $obsolescenceCatId,
-                'status'       => 'Open',
-            ];
+            foreach ($byEntity as $entity => $hosts) {
+                $input = [
+                    'entities_id'  => $entity,
+                    'code'         => $code,
+                    'name'         => substr("EOL: $label", 0, 255),
+                    'scope_label'  => \GlpiPlugin\Sac\Text::clip("$label ×" . count($hosts)),
+                    'severity'     => $sev,
+                    'content'      => "OS: $label\nEnd of life: $date (source: $source)\nAffected hosts:\n"
+                        . implode("\n", array_map(fn ($n) => "- $n", $hosts)),
+                    'assessment_ref' => 'SAC/eol',
+                    'plugin_riskregister_riskcategories_id' => $obsolescenceCatId,
+                    'status'       => 'Open',
+                ];
 
-            FindingWriter::upsert($input, array_keys($assets['resolved']), '', $run);
+                FindingWriter::upsert($input, array_keys($hosts), '', $run);
+            }
+            FindingWriter::clearExcept($code, array_keys($byEntity), 'no affected host left in this entity', $run);
             $run->bump('scanned');
         }
 
@@ -158,7 +160,7 @@ final class EolScan
             // A hardware-pass failure (schema drift, strict-mode date) must not
             // fail the whole EOL run — the OS pass above already stands.
             try {
-                self::runHardware($run, $entity, $recursive, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
+                self::runHardware($run, (int) Config::get('eol_hardware_horizon_days'), $obsolescenceCatId);
             } catch (\Throwable $e) {
                 $run->bump('errors');
                 \Toolbox::logInFile('sac', 'EolScan hardware pass: ' . $e->getMessage() . "\n");
@@ -291,7 +293,7 @@ final class EolScan
      * @param int $hwHorizonDays  hoisted `eol_hardware_horizon_days` (I7)
      * @param int $catId          hoisted Obsolescence category id (I7)
      */
-    private static function runHardware(RunLog $run, int $entity, int $recursive, int $hwHorizonDays, int $catId): void
+    private static function runHardware(RunLog $run, int $hwHorizonDays, int $catId): void
     {
         global $DB;
 
@@ -304,6 +306,7 @@ final class EolScan
             'SELECT'     => [
                 'glpi_computers.id AS id',
                 'glpi_computers.name AS name',
+                'glpi_computers.entities_id AS entities_id',
                 'glpi_infocoms.warranty_date AS warranty_date',
                 'glpi_infocoms.warranty_duration AS warranty_duration',
             ],
@@ -326,6 +329,7 @@ final class EolScan
             ],
         ]) as $c) {
             $cid          = (int) $c['id'];
+            $entity       = (int) $c['entities_id']; // the finding lives where the asset lives
             $cname        = (string) ($c['name'] ?? '');
             $warrantyDate = (string) $c['warranty_date'];
 
@@ -341,14 +345,13 @@ final class EolScan
             $sev     = Severity::forEolDays($days, $hwHorizonDays, 90, 180);
 
             if ($sev === null) {
-                FindingWriter::appendClearedNote(Code::eolHw($cid), $entity, 'warranty end beyond horizon', $run);
+                FindingWriter::clearExcept(Code::eolHw($cid), [], 'warranty end beyond horizon', $run);
                 $run->bump('scanned');
                 continue;
             }
 
             $input = [
                 'entities_id'  => $entity,
-                'is_recursive' => $recursive,
                 'code'         => Code::eolHw($cid),
                 'name'         => substr("Hardware EOL: $cname", 0, 255),
                 'scope_label'  => \GlpiPlugin\Sac\Text::clip($cname),
@@ -361,6 +364,7 @@ final class EolScan
             ];
 
             FindingWriter::upsert($input, [$cid], '', $run);
+            FindingWriter::clearExcept(Code::eolHw($cid), [$entity], 'asset belongs to another entity', $run);
             $run->bump('scanned');
         }
     }

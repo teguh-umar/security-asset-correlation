@@ -35,16 +35,16 @@ final class LicenseScan
     {
         global $DB;
 
-        $entity    = (int) Config::get('finding_entity');
-        $recursive = (int) Config::get('finding_recursive');
         $ignore    = Config::ignoreCategories();
         $checkOver = (bool) Config::get('license_check_overdeployment');
         $commercial = CommercialPublisher::activeManufacturerIds();
 
         // Hoist the per-run-stable category id out of the software loop (I7).
-        $licenseCatId = FindingWriter::categoryId('License Compliance', $entity);
+        // riskregister looks a category up by name alone; root is only where a
+        // missing one would be created.
+        $licenseCatId = FindingWriter::categoryId('License Compliance', 0);
 
-        /** @var array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>> */
+        /** @var array<int,array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>>> [entity][publisher][] */
         $byPub = [];
 
         foreach (self::candidateSoftware($ignore) as $sw) {
@@ -53,71 +53,78 @@ final class LicenseScan
             $swName = (string) ($sw['name'] ?? '');
             $mid    = (int) ($sw['manufacturers_id'] ?? 0);
 
-            $assets   = AssetResolver::computersForSoftware($sid);
-            $installs = $assets['count'];
-            if ($installs === 0) {
+            $assets = AssetResolver::computersForSoftware($sid);
+            if ($assets['count'] === 0) {
                 continue;
             }
             $run->bump('scanned');
 
-            $lic        = self::licenseAggregate($sid);
-            $hasLicense = $lic['n'] > 0;
-            $unlimited  = $lic['unlim'] > 0;
-            $seats      = $lic['seats'];
-            $exp        = $lic['exp']; // 'Y-m-d' or null
+            // Everything below is per entity of the installs: installs, seats
+            // and the finding itself. A licence counts for an entity only when
+            // GLPI would show it there (see licenseAggregate()).
+            $overEntities = [];
+            $anyLicense   = false;
+            foreach (AssetResolver::groupByEntity($assets) as $entity => $hostsById) {
+                $installs   = count($hostsById);
+                $lic        = self::licenseAggregate($sid, $entity);
+                $hasLicense = $lic['n'] > 0;
+                $unlimited  = $lic['unlim'] > 0;
+                $seats      = $lic['seats'];
+                $exp        = $lic['exp']; // 'Y-m-d' or null
+                $anyLicense = $anyLicense || $hasLicense;
 
-            // --- 2a: commercial publisher, zero licence rows --------------------
-            if ($mid > 0 && !$hasLicense && in_array($mid, $commercial, true)) {
-                $byPub[$mid][] = [
-                    'name'     => $swName,
-                    'sid'      => $sid,
-                    'installs' => $installs,
-                    'cids'     => array_map('intval', array_keys($assets['resolved'])),
+                // --- 2a: commercial publisher, zero licence rows ----------------
+                if ($mid > 0 && !$hasLicense && in_array($mid, $commercial, true)) {
+                    $byPub[$entity][$mid][] = [
+                        'name'     => $swName,
+                        'sid'      => $sid,
+                        'installs' => $installs,
+                        'cids'     => array_map('intval', array_keys($hostsById)),
+                    ];
+                }
+
+                // --- 2b: licensed, finite seats, over-deployed -----------------
+                if (!($hasLicense && $checkOver && !$unlimited && $installs > $seats)) {
+                    continue;
+                }
+                $expired = ($exp !== null && $exp < date('Y-m-d'));
+                $sev     = Severity::forLicenseOverage($installs, $seats, $expired);
+
+                $content = "Software: $swName\n"
+                    . "Installed: $installs\n"
+                    . "Licensed seats: $seats\n"
+                    . 'Overage: ' . ($installs - $seats) . "\n"
+                    . 'Earliest licence expiry: ' . ($exp ?? 'n/a')
+                    . ($expired ? ' (EXPIRED)' : '') . "\n"
+                    . "Affected hosts:\n"
+                    . implode("\n", array_map(static fn ($h) => "- $h", array_values($hostsById)));
+
+                $input = [
+                    'entities_id'  => $entity,
+                    'code'         => Code::licOver($sid),
+                    'name'         => substr("License over-deployment: $swName", 0, 255),
+                    'scope_label'  => \GlpiPlugin\Sac\Text::clip("$swName — $installs/$seats"),
+                    'severity'     => $sev,
+                    'content'      => $content,
+                    'assessment_ref' => 'SAC/license',
+                    'plugin_riskregister_riskcategories_id' => $licenseCatId,
+                    'status'       => 'Open',
                 ];
+                FindingWriter::upsert(
+                    $input,
+                    array_map('intval', array_keys($hostsById)),
+                    '',
+                    $run,
+                    [['itemtype' => 'Software', 'items_id' => $sid]]
+                );
+                $overEntities[] = (int) $entity;
             }
 
-            // --- 2b: licensed, finite seats, over-deployed ---------------------
-            if ($hasLicense) {
-                $isOver = $checkOver && !$unlimited && $installs > $seats;
-                if ($isOver) {
-                    $expired = ($exp !== null && $exp < date('Y-m-d'));
-                    $sev     = Severity::forLicenseOverage($installs, $seats, $expired);
-
-                    $hosts   = array_values($assets['resolved']);
-                    $content = "Software: $swName\n"
-                        . "Installed: $installs\n"
-                        . "Licensed seats: $seats\n"
-                        . 'Overage: ' . ($installs - $seats) . "\n"
-                        . 'Earliest licence expiry: ' . ($exp ?? 'n/a')
-                        . ($expired ? ' (EXPIRED)' : '') . "\n"
-                        . "Affected hosts:\n"
-                        . implode("\n", array_map(static fn ($h) => "- $h", $hosts));
-
-                    $input = [
-                        'entities_id'  => $entity,
-                        'is_recursive' => $recursive,
-                        'code'         => Code::licOver($sid),
-                        'name'         => substr("License over-deployment: $swName", 0, 255),
-                        'scope_label'  => \GlpiPlugin\Sac\Text::clip("$swName — $installs/$seats"),
-                        'severity'     => $sev,
-                        'content'      => $content,
-                        'assessment_ref' => 'SAC/license',
-                        'plugin_riskregister_riskcategories_id' => $licenseCatId,
-                        'status'       => 'Open',
-                    ];
-                    FindingWriter::upsert(
-                        $input,
-                        array_map('intval', array_keys($assets['resolved'])),
-                        '',
-                        $run,
-                        [['itemtype' => 'Software', 'items_id' => $sid]]
-                    );
-                } elseif ($checkOver) {
-                    // 2b is enabled and this software was over-deployed before but
-                    // is not now — clear the prior Finding. When 2b is off we never
-                    // asserted a SAC-LIC-OVER Finding, so there is nothing to clear.
-                    FindingWriter::appendClearedNote(Code::licOver($sid), $entity, 'no longer over-deployed', $run);
-                }
+            // 2b is enabled and this software is licensed somewhere: clear the
+            // over-deployment Finding in every entity that is not over now.
+            // When 2b is off we never asserted one, so there is nothing to clear.
+            if ($checkOver && $anyLicense) {
+                FindingWriter::clearExcept(Code::licOver($sid), $overEntities, 'no longer over-deployed', $run);
             }
           } catch (\Throwable $e) {
             // One bad software row must not abort the whole scan.
@@ -126,30 +133,35 @@ final class LicenseScan
           }
         }
 
-        self::emitMissingLicenceFindings($byPub, $commercial, $entity, $recursive, $licenseCatId, $run);
+        self::emitMissingLicenceFindings($byPub, $commercial, $licenseCatId, $run);
     }
 
     /**
-     * One 2a Finding per publisher in $byPub; a cleared note for every active
-     * commercial publisher that produced no unlicensed product this run.
+     * One 2a Finding per (entity, publisher) in $byPub; a cleared note for
+     * every active commercial publisher's Finding in an entity that produced
+     * no unlicensed product this run.
      *
-     * @param array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>> $byPub
+     * @param array<int,array<int,array<int,array{name:string,sid:int,installs:int,cids:array<int,int>}>>> $byPub [entity][publisher][]
      * @param array<int,int> $commercial
      * @param int $licenseCatId hoisted "License Compliance" category id (I7)
      */
     private static function emitMissingLicenceFindings(
         array $byPub,
         array $commercial,
-        int $entity,
-        int $recursive,
         int $licenseCatId,
         RunLog $run
     ): void {
         $prodThreshold    = (int) Config::get('license_2a_products_threshold');
         $installThreshold = (int) Config::get('license_2a_installs_threshold');
 
-        foreach ($byPub as $mid => $rows) {
+        /** @var array<int,array<int,int>> publisher => entities with a Finding this run */
+        $asserted = [];
+
+        foreach ($byPub as $entity => $pubs) {
+          $entity = (int) $entity;
+          foreach ($pubs as $mid => $rows) {
             $mid           = (int) $mid;
+            $asserted[$mid][] = $entity;
             $products      = count($rows);
             $totalInstalls = (int) array_sum(array_column($rows, 'installs'));
             $sev           = ($products > $prodThreshold || $totalInstalls > $installThreshold) ? 'Medium' : 'Low';
@@ -180,7 +192,6 @@ final class LicenseScan
 
             $input = [
                 'entities_id'  => $entity,
-                'is_recursive' => $recursive,
                 'code'         => Code::licMissing($mid),
                 'name'         => substr("Unlicensed commercial software: $pub", 0, 255),
                 'scope_label'  => \GlpiPlugin\Sac\Text::clip("$pub — $products products"),
@@ -191,13 +202,12 @@ final class LicenseScan
                 'status'       => 'Open',
             ];
             FindingWriter::upsert($input, $allCids, '', $run, $extraLinks);
+          }
         }
 
         foreach ($commercial as $mid) {
             $mid = (int) $mid;
-            if (!isset($byPub[$mid])) {
-                FindingWriter::appendClearedNote(Code::licMissing($mid), $entity, 'all products now licensed', $run);
-            }
+            FindingWriter::clearExcept(Code::licMissing($mid), $asserted[$mid] ?? [], 'all products now licensed', $run);
         }
     }
 
@@ -259,13 +269,30 @@ final class LicenseScan
     }
 
     /**
-     * Aggregate the non-deleted licences for one software.
+     * Aggregate the non-deleted licences for one software that cover installs
+     * in $entity: licences owned by that entity, plus recursive ("child
+     * entities") licences owned by one of its ancestors. A licence of another
+     * subsidiary never counts (user decision 2026-10-04); a group-wide licence
+     * is one placed on the root entity with child entities = yes.
      *
      * @return array{seats:int,exp:?string,n:int,unlim:int}
      */
-    private static function licenseAggregate(int $softwareId): array
+    private static function licenseAggregate(int $softwareId, int $entity): array
     {
         global $DB;
+
+        /** @var array<int,array<int,int>> ancestors per entity, stable within a run */
+        static $ancestors = [];
+        if (!isset($ancestors[$entity])) {
+            $ancestors[$entity] = $entity === 0
+                ? []
+                : array_values(array_map('intval', getAncestorsOf('glpi_entities', $entity)));
+        }
+        $scope = '`entities_id` = ' . (int) $entity;
+        if ($ancestors[$entity] !== []) {
+            $scope = "($scope OR (`is_recursive` = 1 AND `entities_id` IN ("
+                . implode(',', $ancestors[$entity]) . ')))';
+        }
 
         $sid = (int) $softwareId;
         // `expire` is a DATE column; legacy rows hold '0000-00-00', which MySQL in
@@ -277,7 +304,7 @@ final class LicenseScan
                        COUNT(*)                                         AS `n`,
                        COALESCE(SUM(`number` <= 0), 0)                  AS `unlim`
                 FROM `glpi_softwarelicenses`
-                WHERE `softwares_id` = $sid AND `is_deleted` = 0";
+                WHERE `softwares_id` = $sid AND `is_deleted` = 0 AND $scope";
 
         $res = $DB->doQuery($sql);
         $row = $res ? $res->fetch_assoc() : null;

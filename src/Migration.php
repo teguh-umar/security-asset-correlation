@@ -27,6 +27,7 @@ final class Migration
         self::purgeAutoEolmap($DB);
 
         Config::setDefaults();
+        \Config::deleteConfigurationValues(Config::CONTEXT, Config::REMOVED);
         Cron::register();
         License\CommercialPublisher::seedFromCsv();
     }

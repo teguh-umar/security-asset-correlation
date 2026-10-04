@@ -6,9 +6,14 @@ final class Config
 {
     public const CONTEXT = 'plugin:sac';
 
+    /**
+     * Keys removed in v1.5.0: a finding now lives in the entity of its
+     * assets and is never recursive, so there is nothing left to configure.
+     * `Migration::install()` deletes any stored value.
+     */
+    public const REMOVED = ['finding_entity', 'finding_recursive'];
+
     public const DEFAULTS = [
-        'finding_entity'                => 0,
-        'finding_recursive'             => 1,
         'eol_scan_enabled'             => 1,
         'eol_horizon_days'             => 365,
         'eol_severity_high_days'       => 90,
@@ -27,13 +32,11 @@ final class Config
      * Explicit per-key widget/validation type for every DEFAULTS key. Drives the
      * config template (checkbox vs number vs entity dropdown vs JSON/text) and
      * front/config.php's POST validation. Never infer the widget from the default
-     * value — an int `0` default is not a boolean (see finding_entity).
+     * value — an int `0` default is not a boolean.
      *
-     * Types: 'bool' | 'int' | 'entity' | 'json' | 'text'.
+     * Types: 'bool' | 'int' | 'json' | 'text'.
      */
     public const FIELD_TYPES = [
-        'finding_entity'                => 'entity',
-        'finding_recursive'             => 'bool',
         'eol_scan_enabled'             => 'bool',
         'eol_horizon_days'             => 'int',
         'eol_severity_high_days'       => 'int',
@@ -74,7 +77,7 @@ final class Config
     {
         return [
             'config/defaults-shape' => static function (): void {
-                sac_assert_eq(self::DEFAULTS['finding_entity'], 0, 'root entity default');
+                sac_assert_eq(array_intersect(self::REMOVED, array_keys(self::DEFAULTS)), [], 'no removed key is still a setting');
                 sac_assert_eq(self::DEFAULTS['license_check_overdeployment'], 0, '2b off by default');
                 $cats = json_decode(self::DEFAULTS['license_ignore_categories'], true);
                 sac_assert_eq($cats, ['system_component'], 'ignore cats seed');
@@ -86,11 +89,10 @@ final class Config
                     array_keys(self::DEFAULTS),
                     'FIELD_TYPES has exactly the DEFAULTS keys, in order'
                 );
-                $known = ['bool', 'int', 'entity', 'json', 'text'];
+                $known = ['bool', 'int', 'json', 'text'];
                 foreach (self::FIELD_TYPES as $k => $t) {
                     sac_assert(in_array($t, $known, true), "$k has a known field type ($t)");
                 }
-                sac_assert_eq(self::FIELD_TYPES['finding_entity'], 'entity', 'finding_entity is an entity, not a bool');
                 sac_assert_eq(self::FIELD_TYPES['license_ignore_categories'], 'json', 'ignore categories is json');
             },
         ];

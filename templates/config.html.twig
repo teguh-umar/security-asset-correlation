@@ -1,7 +1,6 @@
 {#
  # SAC — configuration screen.
- # Autoescape is ON. The ONLY |raw is `entity_dropdown` — framework-generated
- # markup from PHP `Entity::dropdown()`, never plugin data.
+ # Autoescape is ON and there is no |raw.
  # The widget for each key is driven by `types[key]` (Config::FIELD_TYPES),
  # never inferred from the default value.
  #}
@@ -42,8 +41,6 @@
                         {% elseif type == 'int' %}
                             <input type="number" id="sac_{{ key }}" name="{{ key }}"
                                    class="form-control" value="{{ current }}" min="0" step="1">
-                        {% elseif type == 'entity' %}
-                            {{ entity_dropdown|raw }}
                         {% elseif type == 'json' %}
                             <input type="text" id="sac_{{ key }}" name="{{ key }}"
                                    class="form-control" value="{{ current }}">

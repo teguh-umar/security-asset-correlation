@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.5.0] - 2026-10-04
+
+### Changed
+
+- **Findings are written per entity of the affected assets, never
+  recursive.** Until 1.4.x every Finding went to one configured entity
+  (`finding_entity`, Root in production) with `is_recursive = 1`, so every
+  sub-entity saw every SAC Finding and its host list. In this instance a
+  sub-entity is another company. Now the scans still run instance-wide, but
+  group the affected Computers by `entities_id` and upsert one Finding per
+  `(entity, code)`, linking only that entity's Computers; counts, host list
+  and severity are per entity.
+- **Licences are counted per entity**: a licence covers installs in an
+  entity only when that entity owns it, or an ancestor owns it with "child
+  entities" on. A group-wide licence is one on Root, recursive.
+- Settings `finding_entity` and `finding_recursive` are removed (stored
+  values are deleted on install).
+- Shared `lib/pgnsuite/Menu.php` r2 (the sub-nav is hidden when printing).
+
+### Existing findings
+
+- Nothing is deleted. A pre-1.5.0 Finding keeps its id, status, history and
+  derived risks in its entity; it becomes non-recursive and loses its links
+  to other entities' Computers. Other entities get new Findings, status Open.
+  If the old entity has no affected asset left, its Finding gets a cleared
+  note.
+- The scans do this for every Finding they still assert. New
+  `tools/entity_isolate.php` reports every SAC Finding that is recursive or
+  linked to another entity's Computers (dry run by default) and, with
+  `--apply`, repairs those too — including Findings no scan touches any more.
+  **Run the dry run before the first scan or selfcheck after the upgrade.**
+
+### Fixed
+
+- A failed endoflife.date fetch counted as an error with no log line; it now
+  writes one to `files/_log/sac.log`.
+
 ## [1.4.1] - 2026-10-04
 
 Found by the first full `tools/selfcheck.php` run on the VM (55 checks, 5
