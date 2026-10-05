@@ -32,6 +32,17 @@
   governance) with labels, hints and units instead of a table of raw keys;
   read-only for a profile without the UPDATE right.
 
+- **SAC's own pages follow the entity of the viewer** (entity audit). No
+  schema change: a scan run is instance-wide and a reconcile row points at a
+  global dropdown, so the entity is applied when reading.
+  - *Overview / Scan runs*: a user who does not see every entity gets each
+    run's time and status, but not its instance-wide counters or error text,
+    and no EOL Cache Refresh rows.
+  - *Reconcile*: such a user sees only rows about an OS + version present on
+    a Computer of their entities; publisher rows are group level.
+  - Mapping, resolving and re-opening change shared reference data and now
+    need access to the root entity on top of the UPDATE right.
+
 ### Also changed
 - Shared `lib/pgnsuite/Menu.php` r2 (the sub-nav is hidden when printing).
 
@@ -47,6 +58,9 @@
   linked to another entity's Computers (dry run by default) and, with
   `--apply`, repairs those too — including Findings no scan touches any more.
   **Run the dry run before the first scan or selfcheck after the upgrade.**
+- **After the upgrade run `php bin/console cache:clear`.** GLPI does not
+  recompile a changed Twig template in production, so without it the old
+  Setup, Overview, Reconcile and Scan runs screens keep being served.
 
 ### Fixed
 

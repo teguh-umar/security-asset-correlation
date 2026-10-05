@@ -11,8 +11,18 @@ global $DB;
 
 $riskregister = FindingWriter::isAvailable();
 
+// A scan run covers every entity. A user who does not see all entities gets
+// the run's time and status, but not its instance-wide counters or error
+// text, and an open-reconcile count limited to their own entities.
+$seesAll = \GlpiPlugin\Sac\EntityScope::seesAll();
+
+$openBySignal = [];
+foreach (\GlpiPlugin\Sac\Reconcile::listForDisplay() as $row) {
+    $openBySignal[$row['signal_type']] = ($openBySignal[$row['signal_type']] ?? 0) + 1;
+}
+
 $cards = [];
-foreach (['eol', 'license', 'eolcache'] as $module) {
+foreach ($seesAll ? ['eol', 'license', 'eolcache'] : ['eol', 'license'] as $module) {
     $run = $DB->request([
         'FROM'  => 'glpi_plugin_sac_run',
         'WHERE' => ['module' => $module],
@@ -26,14 +36,7 @@ foreach (['eol', 'license', 'eolcache'] as $module) {
         continue;
     }
 
-    $openReconcile = 0;
-    if ($module !== 'eolcache') {
-        $openReconcile = (int) ($DB->request([
-            'COUNT' => 'cpt',
-            'FROM'  => 'glpi_plugin_sac_reconcile',
-            'WHERE' => ['signal_type' => $module, 'is_resolved' => 0],
-        ])->current()['cpt'] ?? 0);
-    }
+    $openReconcile = $openBySignal[$module] ?? 0;
 
     $findingsUrl = null;
     if ($riskregister && $module !== 'eolcache'
@@ -47,8 +50,8 @@ foreach (['eol', 'license', 'eolcache'] as $module) {
         'module'         => $module,
         'date_end'       => $run['date_end'] ?? null,
         'status'         => $run['status'] ?? null,
-        'message'        => (string) ($run['message'] ?? ''),
-        'counts'         => $run ? (json_decode((string) ($run['counts_json'] ?? ''), true) ?: []) : [],
+        'message'        => $seesAll ? (string) ($run['message'] ?? '') : '',
+        'counts'         => ($run && $seesAll) ? (json_decode((string) ($run['counts_json'] ?? ''), true) ?: []) : [],
         'open_reconcile' => $openReconcile,
         'findings_url'   => $findingsUrl,
     ];

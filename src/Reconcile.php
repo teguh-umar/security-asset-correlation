@@ -122,6 +122,10 @@ class Reconcile extends \CommonDBTM
             ];
         }
 
+        // A user who does not see every entity gets only the rows about an
+        // OS + version present on a Computer in their own entities.
+        $pairsInView = EntityScope::osPairsInView();
+
         $out = [];
         foreach ($DB->request([
             'FROM'  => self::TABLE,
@@ -131,6 +135,9 @@ class Reconcile extends \CommonDBTM
             $refId    = (int) $row['ref_id'];
             $subId    = (int) ($row['ref_subid'] ?? 0);
             $itemtype = (string) $row['ref_itemtype'];
+            if (!EntityScope::reconcileRowVisible($itemtype, $refId, $subId, $pairsInView)) {
+                continue;
+            }
             $detail   = (string) ($row['detail'] ?? '');
             $label    = $detail;
 
