@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.2] - 2026-10-05
+
+### Changed
+
+- **The group-level view of SAC's pages is for a Super-Admin only** (user
+  decision), identified by UPDATE on core `config`. 1.5.1 used "sees every
+  entity" for the view and "access to the root entity" for the Reconcile
+  actions, which any profile granted recursively on Root would pass. Now
+  only a Super-Admin gets the instance-wide scan counters and error text,
+  the EOL Cache Refresh rows, every reconcile row, and the Map / Resolve /
+  Re-open actions. Everyone else gets the per-entity view, whatever entity
+  they are in. 1.5.1 was built and not reported deployed; deploy 1.5.2
+  instead.
+
 ## [1.5.1] - 2026-10-05
 
 ### Changed

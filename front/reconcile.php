@@ -8,14 +8,14 @@ include('../../../inc/includes.php');
 Session::checkRight('plugin_sac_finding', READ);
 
 // Mapping an OS, resolving or re-opening a row changes shared reference data,
-// so it needs access to the root entity on top of the UPDATE right.
+// so it is reserved for a Super-Admin on top of the UPDATE right.
 $canAct = Session::haveRight('plugin_sac_finding', UPDATE) && EntityScope::canEditReference();
 
 if (isset($_POST['map']) || isset($_POST['resolve']) || isset($_POST['reopen'])) {
     Session::checkRight('plugin_sac_finding', UPDATE);
     if (!$canAct) {
         Session::addMessageAfterRedirect(
-            __('Reconcile actions apply to every entity and need access to the root entity', 'sac'),
+            __('Reconcile actions apply to every entity and are reserved for a Super-Admin', 'sac'),
             false,
             ERROR
         );
