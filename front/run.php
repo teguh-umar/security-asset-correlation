@@ -23,7 +23,7 @@ foreach ($DB->request([
         'date_end'   => $row['date_end'],
         'status'     => (string) $row['status'],
         // A run covers every entity: its counters and error text are shown
-        // only to a user who sees all entities.
+        // only to a Super-Admin.
         'message'    => $seesAll ? (string) ($row['message'] ?? '') : '',
         'counts'     => $seesAll ? (json_decode((string) ($row['counts_json'] ?? ''), true) ?: []) : [],
     ];

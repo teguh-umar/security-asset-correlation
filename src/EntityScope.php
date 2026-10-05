@@ -8,21 +8,34 @@ namespace GlpiPlugin\Sac;
  *
  * SAC's own tables carry no `entities_id`, on purpose:
  *  - `_run` is the log of an instance-wide cron run. Its counters and error
- *    text cover every entity, so only a user who sees all entities gets them;
- *    anyone else sees that a scan ran, when, and whether it succeeded.
+ *    text cover every entity, so only a Super-Admin gets them; anyone else
+ *    sees that a scan ran, when, and whether it succeeded.
  *  - `_reconcile` rows point at a global dropdown (an OS + version, a
  *    publisher). An OS row belongs to every entity that has a Computer
  *    carrying that OS + version, so its entity is derived from the assets at
  *    read time. Publisher rows are about the shipped watch-list: group level.
  *  - `_eolmap`, `_eolcache`, `_commercialpublishers` are reference data shared
- *    by all entities; only someone with access to the root entity edits them.
+ *    by all entities; only a Super-Admin edits them.
  */
 final class EntityScope
 {
-    /** True when the session covers every entity (always true on CLI / cron). */
+    /**
+     * Group level = a Super-Admin (user decision 2026-10-05: "hanya user
+     * super-admin"), identified the suite's way: by UPDATE on core `config`,
+     * never by profile name. Always true on CLI / cron.
+     *
+     * Deliberately not `Session::canViewAllEntities()`: any profile granted
+     * recursively on the root entity passes that, Super-Admin or not.
+     */
+    public static function isGroupLevel(): bool
+    {
+        return isCommandLine() || \Session::haveRight('config', UPDATE);
+    }
+
+    /** May see instance-wide scan detail and every reconcile row. */
     public static function seesAll(): bool
     {
-        return \Session::canViewAllEntities();
+        return self::isGroupLevel();
     }
 
     /**
@@ -31,12 +44,12 @@ final class EntityScope
      */
     public static function canEditReference(): bool
     {
-        return isCommandLine() || \Session::haveAccessToEntity(0);
+        return self::isGroupLevel();
     }
 
     /**
      * "osId:verId" pairs carried by a live Computer the current user may see;
-     * null when the user sees all entities (no filtering needed).
+     * null for a Super-Admin (no filtering needed).
      *
      * @return array<string,true>|null
      */

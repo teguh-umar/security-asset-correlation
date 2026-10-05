@@ -16,7 +16,7 @@
     <div class="card-body">
     {% if not sees_all %}
         <div class="alert alert-secondary">
-            {{ __('A scan covers every entity. Its counters and error details are shown at group level only; the findings of your entities are on the Overview page.', 'sac') }}
+            {{ __('A scan covers every entity. Its counters and error details are shown to a Super-Admin only; the findings of your entities are on the Overview page.', 'sac') }}
         </div>
     {% endif %}
     {% if runs is empty %}
