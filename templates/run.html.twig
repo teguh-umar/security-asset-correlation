@@ -14,6 +14,11 @@
 } %}
 <div class="card">
     <div class="card-body">
+    {% if not sees_all %}
+        <div class="alert alert-secondary">
+            {{ __('A scan covers every entity. Its counters and error details are shown at group level only; the findings of your entities are on the Overview page.', 'sac') }}
+        </div>
+    {% endif %}
     {% if runs is empty %}
         <div class="text-center text-muted">{{ __('No scans yet', 'sac') }}</div>
     {% else %}
@@ -24,7 +29,7 @@
                     <th data-sortable>{{ __('Started', 'sac') }}</th>
                     <th data-sortable>{{ __('Ended', 'sac') }}</th>
                     <th data-sortable>{{ __('Status', 'sac') }}</th>
-                    <th>{{ __('Counts', 'sac') }}</th>
+                    {% if sees_all %}<th>{{ __('Counts', 'sac') }}</th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -42,6 +47,7 @@
                             <div class="small text-danger mt-1">{{ r.message }}</div>
                         {% endif %}
                     </td>
+                    {% if sees_all %}
                     <td>
                     {% for k, v in r.counts %}
                         <div class="small{{ k == 'errors' and v > 0 ? ' text-danger fw-bold' : '' }}">
@@ -52,6 +58,7 @@
                         <span class="text-muted">&mdash;</span>
                     {% endfor %}
                     </td>
+                    {% endif %}
                 </tr>
             {% endfor %}
             </tbody>

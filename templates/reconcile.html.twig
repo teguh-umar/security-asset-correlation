@@ -4,6 +4,8 @@
  # `action` = front/reconcile.php prefixed URL.
  # `rows` = Reconcile::listForDisplay(include_resolved).
  # `include_resolved` bool, `toggle_url` = link that flips the view.
+ # `can_act` = may map / resolve / re-open (UPDATE + access to root);
+ # `sees_all` = the rows are not filtered by entity.
  #}
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -15,6 +17,16 @@
         </a>
     </div>
     <div class="card-body">
+        {% if not sees_all %}
+            <div class="alert alert-secondary">
+                {{ __('Showing only the operating systems found on assets of your entities.', 'sac') }}
+            </div>
+        {% endif %}
+        {% if not can_act %}
+            <div class="alert alert-secondary">
+                {{ __('A mapping applies to every entity, so mapping and resolving are done at group level (access to the root entity).', 'sac') }}
+            </div>
+        {% endif %}
         <div class="alert alert-info">
             <p class="mb-1">
                 {{ __('An EOL / no_mapping row means SAC found an operating system + version pair but has no end-of-life date for it.', 'sac') }}
@@ -85,7 +97,9 @@
                     <td>{{ row.date_firstseen }}</td>
                     <td>{{ row.date_lastseen }}</td>
                     <td>
-                    {% if row.is_resolved %}
+                    {% if not can_act %}
+                        <span class="text-muted">&mdash;</span>
+                    {% elseif row.is_resolved %}
                         <form method="post" action="{{ action }}" class="d-inline">
                             <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="id" value="{{ row.id }}">

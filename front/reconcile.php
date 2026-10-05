@@ -1,13 +1,29 @@
 <?php
 
+use GlpiPlugin\Sac\EntityScope;
 use GlpiPlugin\Sac\Reconcile;
 
 include('../../../inc/includes.php');
 
 Session::checkRight('plugin_sac_finding', READ);
 
-if (isset($_POST['map'])) {
+// Mapping an OS, resolving or re-opening a row changes shared reference data,
+// so it needs access to the root entity on top of the UPDATE right.
+$canAct = Session::haveRight('plugin_sac_finding', UPDATE) && EntityScope::canEditReference();
+
+if (isset($_POST['map']) || isset($_POST['resolve']) || isset($_POST['reopen'])) {
     Session::checkRight('plugin_sac_finding', UPDATE);
+    if (!$canAct) {
+        Session::addMessageAfterRedirect(
+            __('Reconcile actions apply to every entity and need access to the root entity', 'sac'),
+            false,
+            ERROR
+        );
+        Html::back();
+    }
+}
+
+if (isset($_POST['map'])) {
     $product = trim((string) ($_POST['product'] ?? ''));
     $cycle   = trim((string) ($_POST['cycle'] ?? ''));
     if ($product === '' || $cycle === '') {
@@ -24,14 +40,12 @@ if (isset($_POST['map'])) {
 }
 
 if (isset($_POST['resolve'])) {
-    Session::checkRight('plugin_sac_finding', UPDATE);
     Reconcile::resolve((int) $_POST['resolve']);
     Session::addMessageAfterRedirect(__('Reconcile signal resolved', 'sac'));
     Html::back();
 }
 
 if (isset($_POST['reopen'])) {
-    Session::checkRight('plugin_sac_finding', UPDATE);
     Reconcile::reopen((int) $_POST['reopen']);
     Session::addMessageAfterRedirect(__('Reconcile signal re-opened', 'sac'));
     Html::back();
@@ -49,6 +63,8 @@ $base = Html::getPrefixedUrl('/plugins/sac/front/reconcile.php');
     'rows'             => Reconcile::listForDisplay($includeResolved),
     'include_resolved' => $includeResolved,
     'toggle_url'       => $base . ($includeResolved ? '' : '?resolved=1'),
+    'can_act'          => $canAct,
+    'sees_all'         => EntityScope::seesAll(),
 ]);
 
 Html::footer();
