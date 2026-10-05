@@ -16,6 +16,9 @@ final class Summary
 {
     private const SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
 
+    /** Start of the note FindingWriter appends when a signal is cleared. */
+    private const CLEARED_MARKER = 'Signal cleared on ';
+
     /**
      * @return array{entities:array<int,array<string,mixed>>,total:array<string,int>,signals:array<int,array<string,mixed>>}|null
      *         null when riskregister is not available
@@ -32,7 +35,7 @@ final class Summary
         $table = \GlpiPlugin\Riskregister\Finding::getTable();
         $rows  = [];
         foreach ($DB->request([
-            'SELECT' => ['id', 'entities_id', 'code', 'name', 'severity', 'assessment_ref'],
+            'SELECT' => ['id', 'entities_id', 'code', 'name', 'severity', 'assessment_ref', 'content'],
             'FROM'   => $table,
             'WHERE'  => [
                 'is_deleted'     => 0,
@@ -85,6 +88,12 @@ final class Summary
         $signals  = [];
 
         foreach ($rows as $id => $row) {
+            // A cleared finding stays Open in riskregister until someone closes
+            // it, but the scan no longer asserts it: it is not a current signal.
+            // (A re-assert rewrites `content`, which drops the note.)
+            if (str_contains((string) ($row['content'] ?? ''), self::CLEARED_MARKER)) {
+                continue;
+            }
             $entity   = (int) $row['entities_id'];
             $module   = str_starts_with((string) $row['assessment_ref'], 'SAC/license') ? 'license' : 'eol';
             $severity = in_array($row['severity'], self::SEVERITIES, true) ? (string) $row['severity'] : 'Low';
@@ -129,6 +138,9 @@ final class Summary
                     1 => ['entities_id' => 0, 'code' => 'SAC-EOL-OS-1-1', 'name' => 'EOL: A', 'severity' => 'High', 'assessment_ref' => 'SAC/eol'],
                     2 => ['entities_id' => 5, 'code' => 'SAC-EOL-OS-1-1', 'name' => 'EOL: A', 'severity' => 'Critical', 'assessment_ref' => 'SAC/eol'],
                     3 => ['entities_id' => 5, 'code' => 'SAC-LIC-MISSING-9', 'name' => 'Unlicensed: P', 'severity' => 'Low', 'assessment_ref' => 'SAC/license'],
+                    // pre-split Root row, cleared: must not count anywhere
+                    4 => ['entities_id' => 9, 'code' => 'SAC-EOL-OS-1-1', 'name' => 'EOL: A', 'severity' => 'Critical', 'assessment_ref' => 'SAC/eol',
+                          'content' => "OS: A\n\n---\nSignal cleared on 2026-10-05: no affected host left in this entity"],
                 ];
                 $out = self::aggregate($rows, [1 => 2, 2 => 3], 1);
 
