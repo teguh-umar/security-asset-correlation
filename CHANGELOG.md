@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.1] - 2026-10-05
+
+### Changed
+
+- **SAC's own pages follow the entities of the viewer** (entity audit). No
+  schema change: a scan run is instance-wide and a reconcile row points at a
+  global dropdown, so the entity is applied when reading (`EntityScope`).
+  - *Overview / Scan runs*: a user who does not see every entity gets each
+    run's time and status, but not its instance-wide counters or error text,
+    and no EOL Cache Refresh rows. The open-reconcile count covers only the
+    rows that user can see.
+  - *Reconcile*: such a user sees only rows about an OS + version present on
+    a Computer of their entities; publisher rows are group level.
+  - Mapping, resolving and re-opening change shared reference data and now
+    need access to the root entity on top of the UPDATE right.
+
+### Deploy note
+
+- **After every upgrade run `php bin/console cache:clear`.** GLPI does not
+  recompile a changed Twig template in production, so without it the old
+  screens keep being served. Seen on 1.5.0: the Setup page still showed the
+  old table, with `scan_entities` as a text box holding `[]`, instead of the
+  new cards with the entity picker.
+
 ## [1.5.0] - 2026-10-04
 
 ### Changed
@@ -32,17 +56,6 @@
   governance) with labels, hints and units instead of a table of raw keys;
   read-only for a profile without the UPDATE right.
 
-- **SAC's own pages follow the entity of the viewer** (entity audit). No
-  schema change: a scan run is instance-wide and a reconcile row points at a
-  global dropdown, so the entity is applied when reading.
-  - *Overview / Scan runs*: a user who does not see every entity gets each
-    run's time and status, but not its instance-wide counters or error text,
-    and no EOL Cache Refresh rows.
-  - *Reconcile*: such a user sees only rows about an OS + version present on
-    a Computer of their entities; publisher rows are group level.
-  - Mapping, resolving and re-opening change shared reference data and now
-    need access to the root entity on top of the UPDATE right.
-
 ### Also changed
 - Shared `lib/pgnsuite/Menu.php` r2 (the sub-nav is hidden when printing).
 
@@ -58,9 +71,6 @@
   linked to another entity's Computers (dry run by default) and, with
   `--apply`, repairs those too — including Findings no scan touches any more.
   **Run the dry run before the first scan or selfcheck after the upgrade.**
-- **After the upgrade run `php bin/console cache:clear`.** GLPI does not
-  recompile a changed Twig template in production, so without it the old
-  Setup, Overview, Reconcile and Scan runs screens keep being served.
 
 ### Fixed
 
