@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.3] - 2026-10-05
+
+### Fixed
+
+- **The Overview summary counted findings the scan no longer asserts.** After
+  the per-entity split, the pre-1.5.0 Root findings carry a cleared note but
+  stay Open in riskregister, so Root showed 47 "open" findings with 0 hosts,
+  the total was doubled, and each signal counted one entity too many. The
+  summary now leaves out a finding that carries a cleared note. Nothing in
+  riskregister changes: closing those findings is still a human decision.
+
 ## [1.5.2] - 2026-10-05
 
 ### Changed
