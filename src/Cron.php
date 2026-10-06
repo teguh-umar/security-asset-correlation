@@ -35,6 +35,7 @@ class Cron extends CommonDBTM
 
     public static function cronEolCacheRefresh(CronTask $task): int
     {
+        if (!Config::get('eol_cache_refresh_enabled')) { return 0; }
         $run = RunLog::begin('eolcache');
         try { Eol\EolScan::refreshCache($run); $run->finish('ok'); return 1; }
         catch (\Throwable $e) { $run->finish('error', $e->getMessage()); return 0; }

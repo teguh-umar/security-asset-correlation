@@ -84,6 +84,8 @@ final class SuiteConfig
             'defaults'        => Config::DEFAULTS,
             'types'           => Config::FIELD_TYPES,
             'sections'        => Config::sections(),
+            'category_options' => Config::softwareCategoryNames(),
+            'category_picked'  => Config::ignoreCategories(),
             'entity_dropdown' => $entityDropdown,
             'canedit'         => $canedit,
             'from_pgnsuite'   => $fromPgnSuite,

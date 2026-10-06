@@ -29,7 +29,7 @@
             {% for key, field in section.fields %}
                 {% set current = values[key] is defined ? values[key] : defaults[key] %}
                 {% set type = types[key] is defined ? types[key] : 'text' %}
-                <div class="{{ type in ['entities', 'json'] ? 'col-12' : 'col-md-6' }}">
+                <div class="{{ type in ['entities', 'json', 'softwarecategories'] ? 'col-12' : 'col-md-6' }}">
                 {% if type == 'bool' %}
                     <input type="hidden" name="{{ key }}" value="0">
                     <label class="form-check form-switch mb-0">
@@ -46,6 +46,16 @@
                             <span class="input-group-text">{{ field.unit }}</span>
                         {% endif %}
                     </div>
+                {% elseif type == 'softwarecategories' %}
+                    <label class="form-label" for="sac_{{ key }}">{{ field.label }}</label>
+                    {# Empty hidden field so the key is always posted: no pick then clears the list. #}
+                    <input type="hidden" name="{{ key }}" value="">
+                    <select id="sac_{{ key }}" name="{{ key }}_picked[]" class="form-select" multiple size="6"
+                            {{ canedit ? '' : 'disabled' }}>
+                        {% for name in category_options %}
+                            <option value="{{ name }}" {{ name in category_picked ? 'selected' : '' }}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
                 {% elseif type == 'entities' %}
                     <label class="form-label">{{ field.label }}</label>
                     <input type="hidden" name="{{ key }}" value="">

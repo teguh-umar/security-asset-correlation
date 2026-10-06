@@ -67,6 +67,11 @@ final class EolCache
      */
     public static function ensureFresh(array $pairs, \GlpiPlugin\Sac\RunLog $run): void
     {
+        // Refresh switched off: the scan works from the stored data only, and
+        // a pair with no stored date is simply counted as cache_pending.
+        if (!\GlpiPlugin\Sac\Config::get('eol_cache_refresh_enabled')) {
+            return;
+        }
         $maxAge = (int) \GlpiPlugin\Sac\Config::get('eol_cache_max_age_days');
 
         $products = [];

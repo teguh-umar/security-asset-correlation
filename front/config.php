@@ -16,6 +16,10 @@ if (isset($_POST['update'])) {
             continue;
         }
         $v = $_POST[$k];
+        if ($type === 'softwarecategories') {
+            // The multi-select posts its own array name; the hidden input is the fallback.
+            $v = $_POST['license_ignore_categories_picked'] ?? [];
+        }
 
         switch ($type) {
             case 'bool':
@@ -39,6 +43,14 @@ if (isset($_POST['update'])) {
                 // the hidden empty `scan_entities` arrives, which means "all".
                 $ids = is_array($v) ? array_filter($v, static fn ($id): bool => ctype_digit((string) $id)) : [];
                 $save[$k] = json_encode(array_values(array_unique(array_map('intval', $ids))));
+                break;
+
+            case 'softwarecategories':
+                // Posted as `license_ignore_categories[]` (names). Keep only names
+                // GLPI actually has, so a stale or tampered value cannot be stored.
+                $known = \GlpiPlugin\Sac\Config::softwareCategoryNames();
+                $picked = is_array($v) ? array_values(array_intersect(array_map('strval', $v), $known)) : [];
+                $save[$k] = json_encode($picked);
                 break;
 
             case 'json':

@@ -22,6 +22,7 @@ final class Config
         'eol_severity_medium_days'     => 180,
         'eol_hardware_enabled'         => 1,
         'eol_hardware_horizon_days'    => 180,
+        'eol_cache_refresh_enabled'    => 1,
         'eol_cache_max_age_days'       => 180,
         'license_scan_enabled'         => 1,
         'license_check_overdeployment' => 0,
@@ -48,10 +49,11 @@ final class Config
         'eol_severity_medium_days'     => 'int',
         'eol_hardware_enabled'         => 'bool',
         'eol_hardware_horizon_days'    => 'int',
+        'eol_cache_refresh_enabled'    => 'bool',
         'eol_cache_max_age_days'       => 'int',
         'license_scan_enabled'         => 'bool',
         'license_check_overdeployment' => 'bool',
-        'license_ignore_categories'    => 'json',
+        'license_ignore_categories'    => 'softwarecategories',
         'license_2a_products_threshold'=> 'int',
         'license_2a_installs_threshold'=> 'int',
     ];
@@ -166,8 +168,12 @@ final class Config
                         'hint'  => __('Anything later, within the reporting window, is Low.', 'sac'),
                         'unit'  => $days,
                     ],
+                    'eol_cache_refresh_enabled' => [
+                        'label' => __('Refresh endoflife.date data', 'sac'),
+                        'hint'  => __('Off = the scans use the data already stored and never call endoflife.date.', 'sac'),
+                    ],
                     'eol_cache_max_age_days' => [
-                        'label' => __('Refresh endoflife.date data older than', 'sac'),
+                        'label' => __('Refresh data older than', 'sac'),
                         'hint'  => '',
                         'unit'  => $days,
                     ],
@@ -198,11 +204,33 @@ final class Config
                     ],
                     'license_ignore_categories' => [
                         'label' => __('Software categories to ignore', 'sac'),
-                        'hint'  => __('A JSON array of category names, e.g. ["system_component"].', 'sac'),
+                        'hint'  => __('Pick from the software categories defined in GLPI. Software in these categories is not checked.', 'sac'),
                     ],
                 ],
             ],
         ];
+    }
+
+    /**
+     * Names of every software category in GLPI, for the ignore pick-list.
+     * The stored value is the name, because LicenseScan matches on the name.
+     *
+     * @return array<int,string>
+     */
+    public static function softwareCategoryNames(): array
+    {
+        global $DB;
+        $names = [];
+        foreach ($DB->request([
+            'SELECT' => ['name'],
+            'FROM'   => 'glpi_softwarecategories',
+            'ORDER'  => ['name'],
+        ]) as $row) {
+            if ((string) $row['name'] !== '') {
+                $names[] = (string) $row['name'];
+            }
+        }
+        return array_values(array_unique($names));
     }
 
     public static function setDefaults(): void
@@ -244,11 +272,11 @@ final class Config
                     array_keys(self::DEFAULTS),
                     'FIELD_TYPES has exactly the DEFAULTS keys, in order'
                 );
-                $known = ['bool', 'int', 'json', 'entities', 'text'];
+                $known = ['bool', 'int', 'json', 'entities', 'softwarecategories', 'text'];
                 foreach (self::FIELD_TYPES as $k => $t) {
                     sac_assert(in_array($t, $known, true), "$k has a known field type ($t)");
                 }
-                sac_assert_eq(self::FIELD_TYPES['license_ignore_categories'], 'json', 'ignore categories is json');
+                sac_assert_eq(self::FIELD_TYPES['license_ignore_categories'], 'softwarecategories', 'ignore categories is a GLPI category pick-list');
             },
         ];
     }

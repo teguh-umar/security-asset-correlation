@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.6.1] - 2026-10-06
+
+### Added
+
+- **Switch to refresh endoflife.date data** (`eol_cache_refresh_enabled`,
+  default on). Off: the scans use the stored data only and never call
+  endoflife.date; the EOL Cache Refresh cron does nothing. "Refresh data
+  older than" keeps its day count and applies while the switch is on.
+
+### Changed
+
+- **"Software categories to ignore" is a pick-list of the software categories
+  defined in GLPI**, not a JSON text box. The stored value is still the list of
+  category names, because the licence scan matches on the name. A name that
+  GLPI does not have is dropped on save.
+
 ## [1.6.0] - 2026-10-06
 
 Preparation for the endoflife.date API connection: until now a failed fetch
