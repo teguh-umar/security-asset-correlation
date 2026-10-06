@@ -275,8 +275,11 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
 6. Run each cron once via **Setup → Automatic actions → Execute** (NOT
    `front/cron.php <name>` — numeric only on this host); confirm the
    `glpi_plugin_sac_run` rows close `ok`.
-7. `endoflife.date` reachable from the GLPI host (egress) — if not, Module 1 runs
-   LifeCycle-only; note it.
+7. `endoflife.date` reachable from the GLPI host — check with
+   `php plugins/sac/tools/net_check.php`. It walks the same path as the cron and
+   names the first step that fails. If it cannot be reached, Module 1 runs
+   LifeCycle-only; note it. The site is behind a CDN, so a firewall rule must be
+   written against the hostname, not an IP.
 8. `php plugins/sac/tools/selfcheck.php` → **all PASS** (this seeds and tears down
    throwaway rows and, on a VM where `riskregister` is active, may create real
    Findings for genuinely-EOL assets — expected).

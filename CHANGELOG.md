@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.6.0] - 2026-10-06
+
+Preparation for the endoflife.date API connection: until now a failed fetch
+was invisible, counted only as `errors` on the run card.
+
+### Added
+
+- **`tools/net_check.php`** — CLI, read-only. Walks the real call path and
+  reports the first step that fails: PHP curl/openssl, the GLPI proxy
+  settings (never printing the password), GLPI's URL allowlist, DNS, a direct
+  TLS connect on 443, the fetch through `Toolbox::getURLContent()` exactly as
+  the cron does it, and the payload shape. Ends with what is at stake (cached
+  rows, pairs to refresh, open `no_mapping` rows) and a remedy per failure.
+
+### Fixed
+
+- **A failed endoflife.date fetch now says why.** `Http::get()` discarded
+  `Toolbox::getURLContent()`'s `$msgerr`, so a proxy failure, a DNS failure
+  and a blocked URL were indistinguishable. The reason is kept in
+  `Http::lastError()` and written to `files/_log/sac.log` per product.
+
+### Changed
+
+- Outbound requests send a `User-Agent` and an explicit connect timeout.
+  GLPI's proxy settings are honoured as before (`Toolbox::getURLContent()`);
+  the no-GLPI fallback path, which cannot use the proxy, says so when it
+  fails.
+
 ## [1.5.3] - 2026-10-05
 
 ### Fixed
