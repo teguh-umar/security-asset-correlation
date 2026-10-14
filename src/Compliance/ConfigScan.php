@@ -27,6 +27,18 @@ final class ConfigScan
         }
 
         $collectName = (string) Config::get('compliance_collect_name');
+
+        // A configured task name that matches no defined Collect task is a
+        // misconfiguration, not "nobody has reported yet" — check it ONCE
+        // here so it logs a single warning, instead of CollectReader::latestFor()
+        // quietly returning null for every host in the loop below with no
+        // signal that the name itself is wrong.
+        if (!CollectReader::taskExists($collectName)) {
+            $run->bump('skipped');
+            \Toolbox::logInFile('sac', "ConfigScan: Collect task '$collectName' is not defined — skipped" . "\n");
+            return;
+        }
+
         $critical    = (int) Config::get('compliance_score_critical');
         $high        = (int) Config::get('compliance_score_high');
         $medium      = (int) Config::get('compliance_score_medium');
@@ -92,6 +104,18 @@ final class ConfigScan
             );
 
             $entity = (int) $asset['entities_id'];
+
+            // FindingWriter::upsert() finds-or-creates by (entities_id, code).
+            // If this Computer moved to a different entity since its last
+            // below-threshold scan, that lookup misses the old row entirely
+            // and a SECOND row gets created here, leaving the old entity's
+            // Finding open forever (entities are separate companies — hub §4
+            // — so this is a wrong-attribution bug, not just a stale note).
+            // Clearing every other entity's copy of this per-computer code
+            // first keeps exactly one open row, at the computer's current
+            // entity, same as the EOL module's entity-split handling.
+            FindingWriter::clearExcept($code, [$entity], 'computer re-scanned under a different entity on ' . date('Y-m-d'), $run, $scope);
+
             $input = [
                 'entities_id'    => $entity,
                 'code'           => $code,
@@ -118,10 +142,20 @@ final class ConfigScan
         return $ts !== false && $ts < strtotime("-{$staleDays} days");
     }
 
-    /** @return array<string,callable():void> VM-only. */
+    /** @return array<string,callable():void> First check is PURE (runs offline); the rest are VM-only. */
     public static function selfChecks(): array
     {
         return [
+            // PURE — runs in tools/offline-selfcheck.php. Covers plan Review
+            // Focus #2 (stale data) at the unit level; db/configscan-stale-report-flagged
+            // below covers the same requirement end-to-end through a real Finding.
+            'configscan/is-stale-pure' => static function (): void {
+                sac_assert(!self::isStale(null, 14), 'no date at all is never stale');
+                sac_assert(!self::isStale('2026-10-01 00:00:00', 0), 'staleDays<=0 disables the check');
+                sac_assert(!self::isStale(date('Y-m-d H:i:s', strtotime('-13 days')), 14), 'just under the threshold is not stale');
+                sac_assert(self::isStale(date('Y-m-d H:i:s', strtotime('-15 days')), 14), 'past the threshold is stale');
+                sac_assert(!self::isStale('not-a-date', 14), 'an unparseable date is never flagged stale (fails safe)');
+            },
             'db/configscan-emits-finding-below-threshold' => static function (): void {
                 if (!CollectReader::isAvailable() || !FindingWriter::isAvailable()) {
                     echo "SKIP  db/configscan-emits-finding-below-threshold — Collect schema or riskregister not available\n";
@@ -133,6 +167,7 @@ final class ConfigScan
                 $collectId = 0;
                 $code = Code::configScore($cid);
                 $f = new \GlpiPlugin\Riskregister\Finding();
+                $originalCollectName = (string) Config::get('compliance_collect_name');
                 try {
                     $DB->insert('glpi_plugin_glpiinventory_collects', ['name' => $name]);
                     $collectId = (int) $DB->insertId();
@@ -168,6 +203,7 @@ final class ConfigScan
                     $f->getFromDB((int) $row['id']);
                     sac_assert(str_contains((string) $f->fields['content'], 'Signal cleared'), 'full compliance clears the finding');
                 } finally {
+                    \Config::setConfigurationValues(Config::CONTEXT, ['compliance_collect_name' => $originalCollectName]);
                     foreach (array_keys($f->find(['entities_id' => 0, 'code' => $code])) as $fid) {
                         $f->delete(['id' => (int) $fid], true);
                     }
@@ -189,6 +225,7 @@ final class ConfigScan
                 $name = '__sac_sc_cs_bad__';
                 $cid  = (int) (new \Computer())->add(['name' => '__sac_sc_cs_bad_host__', 'entities_id' => 0]);
                 $collectId = 0;
+                $originalCollectName = (string) Config::get('compliance_collect_name');
                 try {
                     $DB->insert('glpi_plugin_glpiinventory_collects', ['name' => $name]);
                     $collectId = (int) $DB->insertId();
@@ -210,7 +247,89 @@ final class ConfigScan
                     ])->current();
                     sac_assert($reconciled !== null, 'malformed line produced a bad_summary reconcile row');
                 } finally {
+                    \Config::setConfigurationValues(Config::CONTEXT, ['compliance_collect_name' => $originalCollectName]);
                     $DB->delete('glpi_plugin_sac_reconcile', ['ref_itemtype' => 'Computer', 'ref_id' => $cid]);
+                    $DB->delete('glpi_plugin_glpiinventory_collects_contents', ['computers_id' => $cid]);
+                    if ($collectId > 0) {
+                        $DB->delete('glpi_plugin_glpiinventory_collects', ['id' => $collectId]);
+                    }
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            'db/configscan-missing-collect-task-warns-once' => static function (): void {
+                if (!CollectReader::isAvailable()) {
+                    echo "SKIP  db/configscan-missing-collect-task-warns-once — Collect schema not available\n";
+                    return;
+                }
+                global $DB;
+                $bogusName = '__sac_sc_cs_no_such_task__';
+                $originalCollectName = (string) Config::get('compliance_collect_name');
+                $floor = (int) ($DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current()['m'] ?? 0);
+                try {
+                    sac_assert(!CollectReader::taskExists($bogusName), 'fixture precondition: no Collect task has this name');
+                    \Config::setConfigurationValues(Config::CONTEXT, ['compliance_collect_name' => $bogusName]);
+
+                    $run = RunLog::begin('config');
+                    self::run($run);
+                    $run->finish('ok');
+
+                    $row = $DB->request([
+                        'FROM'  => 'glpi_plugin_sac_run',
+                        'WHERE' => ['module' => 'config', 'id' => ['>', $floor]],
+                        'ORDER' => ['id DESC'],
+                    ])->current();
+                    sac_assert($row !== null, 'a _run row was opened');
+                    $counts = json_decode((string) ($row['counts_json'] ?? ''), true) ?: [];
+                    sac_assert_eq((int) ($counts['skipped'] ?? 0), 1, 'skipped is bumped once for the whole run, not per host');
+                    sac_assert_eq((int) ($counts['scanned'] ?? 0), 0, 'no per-host scan loop ran once the task name itself was unresolvable');
+                } finally {
+                    \Config::setConfigurationValues(Config::CONTEXT, ['compliance_collect_name' => $originalCollectName]);
+                    $DB->delete('glpi_plugin_sac_run', ['module' => 'config', 'id' => ['>', $floor]]);
+                }
+            },
+
+            'db/configscan-stale-report-flagged' => static function (): void {
+                if (!CollectReader::isAvailable() || !FindingWriter::isAvailable()) {
+                    echo "SKIP  db/configscan-stale-report-flagged — Collect schema or riskregister not available\n";
+                    return;
+                }
+                global $DB;
+                $name = '__sac_sc_cs_stale__';
+                $cid  = (int) (new \Computer())->add(['name' => '__sac_sc_cs_stale_host__', 'entities_id' => 0]);
+                $collectId = 0;
+                $code = Code::configScore($cid);
+                $f = new \GlpiPlugin\Riskregister\Finding();
+                $originalCollectName = (string) Config::get('compliance_collect_name');
+                try {
+                    $DB->insert('glpi_plugin_glpiinventory_collects', ['name' => $name]);
+                    $collectId = (int) $DB->insertId();
+                    $oldDate = date('Y-m-d H:i:s', strtotime('-30 days'));
+                    $DB->insert('glpi_plugin_glpiinventory_collects_contents', [
+                        'plugin_glpiinventory_collects_id' => $collectId,
+                        'computers_id'                      => $cid,
+                        'value'                              => 'SACCFG1|xccdf_bm|40.00|10|20|0|' . str_replace(' ', 'T', $oldDate) . 'Z',
+                        'date'                                => $oldDate,
+                    ]);
+                    \Config::setConfigurationValues(Config::CONTEXT, [
+                        'compliance_collect_name' => $name,
+                        'compliance_stale_days'   => 14,
+                    ]);
+
+                    $run = RunLog::begin('selftest');
+                    self::run($run);
+                    $run->finish('ok');
+
+                    $rows = $f->find(['entities_id' => 0, 'code' => $code]);
+                    sac_assert_eq(count($rows), 1, 'one Finding written');
+                    $row = array_values($rows)[0];
+                    sac_assert(str_contains((string) $row['content'], 'STALE'), 'a report older than compliance_stale_days is flagged STALE in the Finding content');
+                } finally {
+                    \Config::setConfigurationValues(Config::CONTEXT, ['compliance_collect_name' => $originalCollectName]);
+                    foreach (array_keys($f->find(['entities_id' => 0, 'code' => $code])) as $fid) {
+                        $f->delete(['id' => (int) $fid], true);
+                    }
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
                     $DB->delete('glpi_plugin_glpiinventory_collects_contents', ['computers_id' => $cid]);
                     if ($collectId > 0) {
                         $DB->delete('glpi_plugin_glpiinventory_collects', ['id' => $collectId]);
