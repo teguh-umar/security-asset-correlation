@@ -30,7 +30,7 @@
             <tbody>
             {% for r in rows %}
                 <tr>
-                    <td>{{ r.computer_name }}</td>
+                    <td><a href="{{ r.computer_url }}">{{ r.computer_name }}</a></td>
                     <td>{{ r.host }}</td>
                     <td class="small">
                         {% if r.glpi_ips is empty %}

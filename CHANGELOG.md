@@ -1,6 +1,12 @@
 # Changelog
 
-## [1.7.1-rc4] - 2026-10-14
+## [1.7.1-rc5] - 2026-10-14
+
+### Added (rc4 → rc5)
+
+- **The host name links to its GLPI asset** on both the Config compliance
+  dashboard and the SSH targets list, so a failing host is one click from
+  its Computer record instead of a name you have to search for.
 
 ### Fixed (rc3 → rc4)
 

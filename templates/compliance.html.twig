@@ -31,7 +31,7 @@
             {% for r in rows %}
                 {% set sc_class = r.score < 50 ? 'text-danger fw-bold' : (r.score < 85 ? 'text-warning fw-bold' : 'text-success') %}
                 <tr>
-                    <td>{{ r.computer_name }}</td>
+                    <td><a href="{{ r.computer_url }}">{{ r.computer_name }}</a></td>
                     <td class="text-muted small">{{ r.benchmark_id }}</td>
                     <td data-sort="{{ r.score }}" class="{{ sc_class }}">{{ r.score }}%</td>
                     <td class="text-end">{{ r.pass_count }}</td>
