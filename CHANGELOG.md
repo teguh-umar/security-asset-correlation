@@ -1,6 +1,17 @@
 # Changelog
 
-## [1.7.1-rc1] - 2026-10-14
+## [1.7.1-rc2] - 2026-10-14
+
+### Fixed (rc1 → rc2)
+
+- **The Computer picker on the SSH targets screen listed nothing.** rc1
+  passed `'entity' => 'all'` to `Dropdown::show()`; core accepts only an
+  entity id, an array of ids, or `-1` ("all active entities", and already
+  the default). A non-numeric string falls through
+  `Session::getMatchingActiveEntities()` to its "Unexpected value type"
+  branch, which returns an empty array — so the dropdown was restricted to
+  zero entities and silently showed no Computers, with no error anywhere.
+  The option is now simply not passed.
 
 ### Changed
 
