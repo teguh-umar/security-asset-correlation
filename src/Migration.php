@@ -121,6 +121,24 @@ final class Migration
               PRIMARY KEY (`id`),
               KEY `module_start` (`module`,`date_start`)
             ) $table_options";
+
+        self::$tables['glpi_plugin_sac_configscan'] = "
+            CREATE TABLE `glpi_plugin_sac_configscan` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `computers_id` int unsigned NOT NULL DEFAULT 0,
+              `benchmark_id` varchar(255) NOT NULL DEFAULT '',
+              `score` decimal(5,2) NOT NULL DEFAULT 0.00,
+              `pass_count` int unsigned NOT NULL DEFAULT 0,
+              `fail_count` int unsigned NOT NULL DEFAULT 0,
+              `other_count` int unsigned NOT NULL DEFAULT 0,
+              `date_scan` timestamp NULL DEFAULT NULL,
+              `date_collected` timestamp NULL DEFAULT NULL,
+              `raw_line` text,
+              `date_creation` timestamp NULL DEFAULT NULL,
+              `date_mod` timestamp NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `computer` (`computers_id`)
+            ) $table_options";
     }
 
     /**
@@ -319,6 +337,13 @@ final class Migration
     public static function selfChecks(): array
     {
         return [
+            'db/migration-configscan-table' => static function (): void {
+                global $DB;
+                sac_assert($DB->tableExists('glpi_plugin_sac_configscan'), 'table created by install()');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'computers_id'), 'computers_id column');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'score'), 'score column');
+                sac_assert(self::keyExists($DB, 'glpi_plugin_sac_configscan', 'computer'), 'UNIQUE key on computers_id');
+            },
             'db/migration-eolmap-key' => static function (): void {
                 global $DB;
                 $t = 'glpi_plugin_sac_test_eolmap_migration';
