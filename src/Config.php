@@ -29,6 +29,12 @@ final class Config
         'license_ignore_categories'    => '["system_component"]',
         'license_2a_products_threshold'=> 5,
         'license_2a_installs_threshold'=> 20,
+        'compliance_scan_enabled'      => 1,
+        'compliance_collect_name'      => 'sac_oscap_summary',
+        'compliance_score_critical'    => 50,
+        'compliance_score_high'        => 70,
+        'compliance_score_medium'      => 85,
+        'compliance_stale_days'        => 14,
     ];
 
     /**
@@ -56,6 +62,12 @@ final class Config
         'license_ignore_categories'    => 'softwarecategories',
         'license_2a_products_threshold'=> 'int',
         'license_2a_installs_threshold'=> 'int',
+        'compliance_scan_enabled'      => 'bool',
+        'compliance_collect_name'      => 'text',
+        'compliance_score_critical'    => 'int',
+        'compliance_score_high'        => 'int',
+        'compliance_score_medium'      => 'int',
+        'compliance_stale_days'        => 'int',
     ];
 
     public static function get(string $key): mixed
@@ -208,6 +220,41 @@ final class Config
                     ],
                 ],
             ],
+            [
+                'title'  => __('Config compliance (OpenSCAP Tier 1)', 'sac'),
+                'icon'   => 'ti ti-shield-check',
+                'hint'   => __('Reads the one-line oscap summary GLPI Agent\'s Collect task reports per host. Does not import per-rule results — that is a future phase.', 'sac'),
+                'fields' => [
+                    'compliance_scan_enabled' => [
+                        'label' => __('Scan config-compliance Collect data', 'sac'),
+                        'hint'  => '',
+                    ],
+                    'compliance_collect_name' => [
+                        'label' => __('GLPI Inventory Collect task name', 'sac'),
+                        'hint'  => __('Must exactly match the Collect task defined under Setup.', 'sac'),
+                    ],
+                    'compliance_score_critical' => [
+                        'label' => __('Severity Critical below', 'sac'),
+                        'hint'  => '',
+                        'unit'  => '%',
+                    ],
+                    'compliance_score_high' => [
+                        'label' => __('Severity High below', 'sac'),
+                        'hint'  => '',
+                        'unit'  => '%',
+                    ],
+                    'compliance_score_medium' => [
+                        'label' => __('Severity Medium below', 'sac'),
+                        'hint'  => __('Anything at or above this, below 100%, is Low. 100% exactly clears the finding.', 'sac'),
+                        'unit'  => '%',
+                    ],
+                    'compliance_stale_days' => [
+                        'label' => __('Flag a host as stale after', 'sac'),
+                        'hint'  => __('No fresher Collect report in this many days.', 'sac'),
+                        'unit'  => __('days', 'sac'),
+                    ],
+                ],
+            ],
         ];
     }
 
@@ -250,6 +297,7 @@ final class Config
                 sac_assert_eq(self::DEFAULTS['license_check_overdeployment'], 0, '2b off by default');
                 $cats = json_decode(self::DEFAULTS['license_ignore_categories'], true);
                 sac_assert_eq($cats, ['system_component'], 'ignore cats seed');
+                sac_assert_eq(self::DEFAULTS['compliance_scan_enabled'], 1, 'config compliance scan on by default');
             },
 
             // VM-only: sections() calls __().
