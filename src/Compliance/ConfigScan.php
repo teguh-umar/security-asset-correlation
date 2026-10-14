@@ -416,6 +416,60 @@ final class ConfigScan
                     (new \Computer())->delete(['id' => $cid], true);
                 }
             },
+
+            // A Computer's code (Code::configScore($cid)) is fixed, but
+            // FindingWriter::upsert() finds-or-creates by (entities_id,
+            // code) — if the Computer moves entities between scans, that
+            // lookup misses the old row at its old entity and would leave
+            // it open forever without the clearExcept() call processTarget()
+            // makes before every upsert. Mirrors FindingWriter's own
+            // "db/writer-entity-split" check for the EOL module's
+            // equivalent scenario.
+            'db/configscan-processtarget-entity-move-clears-old-finding' => static function (): void {
+                if (!FindingWriter::isAvailable()) {
+                    echo "SKIP  db/configscan-processtarget-entity-move-clears-old-finding — riskregister not available\n";
+                    return;
+                }
+                global $DB;
+                $other = $DB->request([
+                    'SELECT' => ['id'], 'FROM' => 'glpi_entities', 'WHERE' => ['id' => ['>', 0]], 'LIMIT' => 1,
+                ])->current();
+                if (!$other) {
+                    echo "SKIP  db/configscan-processtarget-entity-move-clears-old-finding — this GLPI has only the root entity\n";
+                    return;
+                }
+                $e2  = (int) $other['id'];
+                $cid = (int) (new \Computer())->add(['name' => '__sac_sc_pt_move_host__', 'entities_id' => 0]);
+                $code = Code::configScore($cid);
+                $catId = FindingWriter::categoryId('Configuration Compliance', 0);
+                $f = new \GlpiPlugin\Riskregister\Finding();
+                try {
+                    $run = RunLog::begin('selftest');
+                    $targetAtRoot = ['computers_id' => $cid, 'entities_id' => 0, 'name' => '__sac_sc_pt_move_host__'];
+                    self::processTarget($targetAtRoot, 'SACCFG1|xccdf_bm|40.00|10|20|0|2026-10-14T00:00:00Z', $catId, null, $run);
+
+                    $rootRows = $f->find(['entities_id' => 0, 'code' => $code]);
+                    sac_assert_eq(count($rootRows), 1, 'Finding written at the original entity');
+                    $rootId = (int) array_key_first($rootRows);
+
+                    // Same Computer, now scanned under a different entity.
+                    $targetMoved = ['computers_id' => $cid, 'entities_id' => $e2, 'name' => '__sac_sc_pt_move_host__'];
+                    self::processTarget($targetMoved, 'SACCFG1|xccdf_bm|40.00|10|20|0|2026-10-15T00:00:00Z', $catId, null, $run);
+                    $run->finish('ok');
+
+                    $f->getFromDB($rootId);
+                    sac_assert(str_contains((string) $f->fields['content'], 'Signal cleared'), 'the old entity\'s Finding is cleared, not left open forever');
+
+                    $newRows = $f->find(['entities_id' => $e2, 'code' => $code]);
+                    sac_assert_eq(count($newRows), 1, 'a new Finding exists at the Computer\'s current entity');
+                } finally {
+                    foreach (array_keys($f->find(['code' => $code])) as $fid) {
+                        $f->delete(['id' => (int) $fid], true);
+                    }
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
         ];
     }
 }
