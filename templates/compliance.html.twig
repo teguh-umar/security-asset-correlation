@@ -6,8 +6,11 @@
  #}
 <div class="card">
     <div class="card-body">
-    <div class="alert alert-secondary">
-        {{ __('Tier 1: one score per host from the OpenSCAP summary GLPI Agent\'s Collect task reports. Per-rule results are not imported in this phase.', 'sac') }}
+    <div class="alert alert-secondary d-flex justify-content-between align-items-center">
+        <span>{{ __('Tier 1: one score per registered host, pulled over a restricted read-only SSH connection. Per-rule results are not imported in this phase.', 'sac') }}</span>
+        {% if can_manage_targets %}
+            <a href="{{ sshtargets_url }}" class="btn btn-sm btn-outline-secondary text-nowrap ms-3">{{ __('Manage SSH targets', 'sac') }}</a>
+        {% endif %}
     </div>
     {% if rows is empty %}
         <div class="text-center text-muted">{{ __('No config-compliance data collected yet', 'sac') }}</div>
