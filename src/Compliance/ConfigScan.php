@@ -171,7 +171,11 @@ final class ConfigScan
             'entities_id'    => $entity,
             'code'           => $code,
             'name'           => sprintf(__('Config compliance below threshold: %s', 'sac'), $target['name']),
-            'scope_label'    => sprintf('%s — %.1f%%', $target['name'], $parsed['score']),
+            // %.2f, matching both the Finding's own Description and the
+            // dashboard's decimal(5,2) column — %.1f here printed the same
+            // score as "49.2%" next to "49.17%" elsewhere, which reads like
+            // two different measurements of the same host.
+            'scope_label'    => sprintf('%s — %.2f%%', $target['name'], $parsed['score']),
             'severity'       => $sev,
             'status'         => 'Open',
             'content'        => $content,

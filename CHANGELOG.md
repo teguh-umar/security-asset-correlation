@@ -1,6 +1,14 @@
 # Changelog
 
-## [1.7.1-rc3] - 2026-10-14
+## [1.7.1-rc4] - 2026-10-14
+
+### Fixed (rc3 → rc4)
+
+- **The Finding's "Scope / affected area" showed a different percentage
+  than everything else.** It was formatted to one decimal (`49.2%`) while
+  the Finding's own Description and the dashboard both show two
+  (`49.17%`), so the same measurement read as two different numbers. All
+  three now use two decimals.
 
 ### Added (rc2 → rc3)
 
