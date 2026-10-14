@@ -178,6 +178,39 @@ final class AssetResolver
         return self::computersForSoftware($softwareId)['count'];
     }
 
+    /**
+     * Every non-deleted, non-template Computer, optionally restricted to
+     * {@see Config::scanScope()}. Used by modules whose source data is keyed
+     * directly to a Computer (Module 3) rather than to an OS/Software id.
+     *
+     * @param array<int,int>|null $scope null = every entity
+     * @return array<int,array{name:string,entities_id:int}>
+     */
+    public static function activeComputers(?array $scope): array
+    {
+        global $DB;
+        $where = [
+            'is_deleted'  => 0,
+            'is_template' => 0,
+        ];
+        if ($scope !== null) {
+            $where['entities_id'] = $scope;
+        }
+
+        $out = [];
+        foreach ($DB->request([
+            'SELECT' => ['id', 'name', 'entities_id'],
+            'FROM'   => 'glpi_computers',
+            'WHERE'  => $where,
+        ]) as $row) {
+            $out[(int) $row['id']] = [
+                'name'        => (string) $row['name'],
+                'entities_id' => (int) $row['entities_id'],
+            ];
+        }
+        return $out;
+    }
+
     /** @return array<string,callable():void> VM-only checks — they touch $DB. */
     public static function selfChecks(): array
     {
@@ -256,6 +289,28 @@ final class AssetResolver
                     $DB->delete('glpi_computers', ['id' => $cId2]);
                     $DB->delete('glpi_operatingsystemversions', ['id' => $verId]);
                     $DB->delete('glpi_operatingsystems', ['id' => $osId]);
+                }
+            },
+            'db/active-computers' => static function (): void {
+                global $DB;
+                $cId = 0; $cId2 = 0;
+                try {
+                    $cId  = (int) (new \Computer())->add(['name' => '__sac_ac_1__', 'entities_id' => 0]);
+                    $cId2 = (int) (new \Computer())->add(['name' => '__sac_ac_2__', 'entities_id' => 0]);
+
+                    $all = self::activeComputers(null);
+                    sac_assert_eq($all[$cId]['name'], '__sac_ac_1__', 'computer present with its name');
+                    sac_assert_eq($all[$cId]['entities_id'], 0, 'computer present with its entity');
+
+                    $DB->update('glpi_computers', ['is_deleted' => 1], ['id' => $cId2]);
+                    $all2 = self::activeComputers(null);
+                    sac_assert(!array_key_exists($cId2, $all2), 'deleted computer excluded');
+
+                    $scoped = self::activeComputers([9999999]); // entity that has none of our fixtures
+                    sac_assert(!array_key_exists($cId, $scoped), 'out-of-scope entity excluded');
+                } finally {
+                    $DB->delete('glpi_computers', ['id' => $cId]);
+                    $DB->delete('glpi_computers', ['id' => $cId2]);
                 }
             },
         ];
