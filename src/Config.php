@@ -7,11 +7,15 @@ final class Config
     public const CONTEXT = 'plugin:sac';
 
     /**
-     * Keys removed in v1.5.0: a finding now lives in the entity of its
-     * assets and is never recursive, so there is nothing left to configure.
+     * Keys removed in v1.5.0 (a finding now lives in the entity of its
+     * assets and is never recursive, so there is nothing left to configure)
+     * and v1.7.1 (`compliance_collect_name` assumed GLPI Inventory's
+     * Collect feature could capture arbitrary command output; VM
+     * verification showed it can't — Module 3 Tier 1 now pulls over SSH
+     * instead, see the `compliance_ssh_*` keys below).
      * `Migration::install()` deletes any stored value.
      */
-    public const REMOVED = ['finding_entity', 'finding_recursive'];
+    public const REMOVED = ['finding_entity', 'finding_recursive', 'compliance_collect_name'];
 
     public const DEFAULTS = [
         'scan_entities'                => '[]',
@@ -30,7 +34,10 @@ final class Config
         'license_2a_products_threshold'=> 5,
         'license_2a_installs_threshold'=> 20,
         'compliance_scan_enabled'      => 1,
-        'compliance_collect_name'      => 'sac_oscap_summary',
+        'compliance_ssh_key_path'      => '/etc/sac-collect/sac_collect_key',
+        'compliance_ssh_known_hosts_path' => '/etc/sac-collect/known_hosts',
+        'compliance_remote_summary_path'  => '/var/lib/sac/oscap_summary.txt',
+        'compliance_ssh_timeout_seconds'  => 15,
         'compliance_score_critical'    => 50,
         'compliance_score_high'        => 70,
         'compliance_score_medium'      => 85,
@@ -63,7 +70,10 @@ final class Config
         'license_2a_products_threshold'=> 'int',
         'license_2a_installs_threshold'=> 'int',
         'compliance_scan_enabled'      => 'bool',
-        'compliance_collect_name'      => 'text',
+        'compliance_ssh_key_path'      => 'text',
+        'compliance_ssh_known_hosts_path' => 'text',
+        'compliance_remote_summary_path'  => 'text',
+        'compliance_ssh_timeout_seconds'  => 'int',
         'compliance_score_critical'    => 'int',
         'compliance_score_high'        => 'int',
         'compliance_score_medium'      => 'int',
@@ -223,15 +233,28 @@ final class Config
             [
                 'title'  => __('Config compliance (OpenSCAP Tier 1)', 'sac'),
                 'icon'   => 'ti ti-shield-check',
-                'hint'   => __('Reads the one-line oscap summary GLPI Agent\'s Collect task reports per host. Does not import per-rule results — that is a future phase.', 'sac'),
+                'hint'   => __('Pulls the one-line oscap summary from each registered host over a restricted, read-only SSH connection. Register hosts under Config compliance - SSH targets. Does not import per-rule results — that is a future phase.', 'sac'),
                 'fields' => [
                     'compliance_scan_enabled' => [
-                        'label' => __('Scan config-compliance Collect data', 'sac'),
+                        'label' => __('Scan registered SSH targets', 'sac'),
                         'hint'  => '',
                     ],
-                    'compliance_collect_name' => [
-                        'label' => __('GLPI Inventory Collect task name', 'sac'),
-                        'hint'  => __('Must exactly match the Collect task defined under Setup.', 'sac'),
+                    'compliance_ssh_key_path' => [
+                        'label' => __('SSH private key path', 'sac'),
+                        'hint'  => __('On this GLPI host. Must be readable only by the user the cron runs as.', 'sac'),
+                    ],
+                    'compliance_ssh_known_hosts_path' => [
+                        'label' => __('SSH known_hosts path', 'sac'),
+                        'hint'  => __('Pre-populated with ssh-keyscan for every registered host, so the cron never blocks on a host-key prompt.', 'sac'),
+                    ],
+                    'compliance_remote_summary_path' => [
+                        'label' => __('Remote summary file path', 'sac'),
+                        'hint'  => __('Must match the path the host\'s oscap cron wrapper writes to, and the forced-command in its authorized_keys entry.', 'sac'),
+                    ],
+                    'compliance_ssh_timeout_seconds' => [
+                        'label' => __('SSH timeout', 'sac'),
+                        'hint'  => '',
+                        'unit'  => __('seconds', 'sac'),
                     ],
                     'compliance_score_critical' => [
                         'label' => __('Severity Critical below', 'sac'),
