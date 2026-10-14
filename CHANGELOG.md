@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.7.1] - 2026-10-14
+
+### Changed
+
+- **Module 3 Phase 1's transport is now SSH, not GLPI Inventory Collect.**
+  VM verification of v1.7.0 found Collect only supports file-metadata/
+  registry/WMI collection — none of which can capture a Linux cron's
+  arbitrary text output — so the design could not work as shipped. The
+  host's oscap cron wrapper (`tools/host-agent/sac-oscap-summary.sh`,
+  distributed separately — it runs on the monitored host, not through
+  this plugin) now writes its one-line summary to a fixed path, and SAC
+  pulls it over a restricted, forced-command, read-only SSH key — the
+  remote key can only `cat` that one file, nothing else, no shell. Hosts
+  are registered one at a time on a new **SSH targets** admin screen
+  (linked from the Config compliance dashboard) — nothing is
+  auto-discovered from GLPI's own network inventory.
+- `compliance_collect_name` is removed; replaced by `compliance_ssh_key_path`,
+  `compliance_ssh_known_hosts_path`, `compliance_remote_summary_path`, and
+  `compliance_ssh_timeout_seconds`. New table `glpi_plugin_sac_sshtargets`
+  (one row per registered Computer: host, port, SSH user, active flag).
+- Staleness and the Finding's reported scan time are now read from the
+  oscap summary line's OWN embedded timestamp (set by the host's cron),
+  not from "when did SAC last manage to connect" — a successful SSH pull
+  of a file the host hasn't refreshed in weeks no longer reads as fresh.
+
 ## [1.7.0] - 2026-10-14
 
 ### Added
