@@ -46,16 +46,24 @@ foreach ($DB->request([
         'fail_count'     => (int) $row['fail_count'],
         'other_count'    => (int) $row['other_count'],
         'date_collected' => $row['date_collected'],
-        'is_stale'       => $row['date_collected'] !== null && $row['date_collected'] < $cutoff,
+        // Judged from the host's OWN reported scan timestamp (date_scan),
+        // not date_collected ("did SAC last manage to SSH in") — same
+        // semantic ConfigScan::isStale() uses for the Finding content, so
+        // this dashboard and the Finding never disagree about staleness.
+        'is_stale'       => $row['date_scan'] !== null && $row['date_scan'] < $cutoff,
     ];
 }
+
+$canManageTargets = \Session::haveRight('plugin_sac_config', UPDATE);
 
 Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'compliance');
 \GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'compliance');
 
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/compliance.html.twig', [
-    'rows'       => $rows,
-    'stale_days' => $staleDays,
+    'rows'                => $rows,
+    'stale_days'          => $staleDays,
+    'can_manage_targets'  => $canManageTargets,
+    'sshtargets_url'      => Html::getPrefixedUrl('/plugins/sac/front/sshtargets.php'),
 ]);
 
 Html::footer();

@@ -1,0 +1,103 @@
+{#
+ # SAC — SSH pull targets for config-compliance (OpenSCAP Tier 1). Admin
+ # registers which Computers to poll over SSH; nothing is auto-discovered
+ # from GLPI's own network inventory.
+ # Autoescape ON — no |raw on plugin data. `computer_dropdown` is core-
+ # generated markup (Dropdown::show()), the one deliberate exception, same
+ # pattern as config.html.twig's entity_dropdown.
+ # `rows` = [{id, computer_name, host, port, ssh_user, is_active}]
+ #}
+<div class="card mb-3">
+    <div class="card-header">
+        <h3 class="card-title">{{ __('Registered SSH targets', 'sac') }}</h3>
+    </div>
+    <div class="card-body">
+    {% if rows is empty %}
+        <div class="text-center text-muted">{{ __('No hosts registered yet', 'sac') }}</div>
+    {% else %}
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th data-sortable>{{ __('Computer', 'sac') }}</th>
+                    <th data-sortable>{{ __('Host', 'sac') }}</th>
+                    <th class="text-end">{{ __('Port', 'sac') }}</th>
+                    <th data-sortable>{{ __('SSH user', 'sac') }}</th>
+                    <th>{{ __('Active', 'sac') }}</th>
+                    {% if can_act %}<th></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td>{{ r.computer_name }}</td>
+                    <td>{{ r.host }}</td>
+                    <td class="text-end">{{ r.port }}</td>
+                    <td>{{ r.ssh_user }}</td>
+                    <td>
+                        {% if r.is_active %}
+                            <span class="badge bg-success text-white">{{ __('Active', 'sac') }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary text-white">{{ __('Paused', 'sac') }}</span>
+                        {% endif %}
+                    </td>
+                    {% if can_act %}
+                    <td class="text-end">
+                        <form method="post" class="d-inline">
+                            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" name="toggle" value="{{ r.id }}" class="btn btn-sm btn-outline-secondary">
+                                {{ r.is_active ? __('Pause', 'sac') : __('Resume', 'sac') }}
+                            </button>
+                        </form>
+                        <form method="post" class="d-inline" onsubmit="return confirm('{{ __('Remove this SSH target?', 'sac') }}');">
+                            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" name="delete" value="{{ r.id }}" class="btn btn-sm btn-outline-danger">
+                                {{ __('Remove', 'sac') }}
+                            </button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% include '@sac/_sortable-table.html.twig' %}
+    {% endif %}
+    </div>
+</div>
+
+{% if can_act %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">{{ __('Register a host', 'sac') }}</h3>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-secondary">
+            {{ __('The Computer must already have the restricted SSH key installed and its oscap cron wrapper deployed — this form only registers it with SAC, it does not configure the host itself.', 'sac') }}
+        </div>
+        <form method="post">
+            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">{{ __('Computer', 'sac') }}</label>
+                    {{ computer_dropdown|raw }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">{{ __('Host / IP', 'sac') }}</label>
+                    <input type="text" name="host" class="form-control" placeholder="10.129.2.112" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">{{ __('Port', 'sac') }}</label>
+                    <input type="number" name="port" class="form-control" value="22" min="1" max="65535" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">{{ __('SSH user', 'sac') }}</label>
+                    <input type="text" name="ssh_user" class="form-control" value="pgnusr" required>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" name="add" value="1" class="btn btn-primary">{{ __('Save', 'sac') }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
