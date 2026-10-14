@@ -1,5 +1,7 @@
 <?php
 
+use GlpiPlugin\Sac\Compliance\SshSummaryReader;
+
 include('../../../inc/includes.php');
 
 Session::checkRight('plugin_sac_config', READ);
@@ -18,6 +20,22 @@ if (isset($_POST['add'])) {
 
     if ($cid <= 0 || $host === '' || $user === '' || $port <= 0 || $port > 65535) {
         Session::addMessageAfterRedirect(__('Computer, host and SSH user are required; port must be 1-65535', 'sac'), false, ERROR);
+        Html::back();
+    }
+
+    // Rejected here as a clear admin-facing error; SshSummaryReader also
+    // refuses an unsafe value defensively at fetch time regardless of how
+    // it got into the table, but failing fast here is the better UX and
+    // keeps a bad row out of the database in the first place. A value
+    // starting with "-" is the real risk: ssh would read it as an OPTION
+    // (e.g. "-oProxyCommand=...") rather than a hostname/username, and
+    // execute that locally on the GLPI host.
+    if (!SshSummaryReader::isSafeSshIdentifier($host) || !SshSummaryReader::isSafeSshIdentifier($user)) {
+        Session::addMessageAfterRedirect(
+            __('Host and SSH user may only contain letters, digits, dots, underscores and hyphens, and may not start with a hyphen', 'sac'),
+            false,
+            ERROR
+        );
         Html::back();
     }
 

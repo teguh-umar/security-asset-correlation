@@ -192,6 +192,13 @@ log "Summary line: $LINE"
 OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
 mkdir -p "$OUTPUT_DIR"
 TMP_OUTPUT="$(mktemp "$OUTPUT_DIR/.oscap_summary.XXXXXX")"
+# Extend the EXIT trap to also remove this temp file: with `set -e`, a
+# failed `chown` (e.g. the configured group doesn't exist on this host)
+# exits immediately and, without this, leaves a stray .oscap_summary.*
+# file behind forever — $OUTPUT_FILE itself is never touched in that case,
+# so it silently goes stale with no obvious cause. `rm -f` is a no-op once
+# the file has already been moved away by a successful run below.
+trap 'rm -rf "$WORKDIR"; rm -f "$TMP_OUTPUT"' EXIT
 printf '%s\n' "$LINE" > "$TMP_OUTPUT"
 chown "$OUTPUT_OWNER" "$TMP_OUTPUT"
 chmod "$OUTPUT_MODE" "$TMP_OUTPUT"
