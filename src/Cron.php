@@ -13,7 +13,7 @@ class Cron extends CommonDBTM
             'EolScan'         => ['description' => __('SAC — scan operating systems for EOL/EOS', 'sac')],
             'EolCacheRefresh' => ['description' => __('SAC — refresh endoflife.date cache', 'sac')],
             'LicenseScan'     => ['description' => __('SAC — scan software for license governance', 'sac')],
-            'ConfigScan'      => ['description' => __('SAC — scan config-compliance Collect data', 'sac')],
+            'ConfigScan'      => ['description' => __('SAC — pull config-compliance data over SSH', 'sac')],
             default           => ['description' => $name],
         };
     }
