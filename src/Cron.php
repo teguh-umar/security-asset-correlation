@@ -13,6 +13,7 @@ class Cron extends CommonDBTM
             'EolScan'         => ['description' => __('SAC — scan operating systems for EOL/EOS', 'sac')],
             'EolCacheRefresh' => ['description' => __('SAC — refresh endoflife.date cache', 'sac')],
             'LicenseScan'     => ['description' => __('SAC — scan software for license governance', 'sac')],
+            'ConfigScan'      => ['description' => __('SAC — scan config-compliance Collect data', 'sac')],
             default           => ['description' => $name],
         };
     }
@@ -50,10 +51,51 @@ class Cron extends CommonDBTM
         catch (\Throwable $e) { $run->finish('error', $e->getMessage()); \Toolbox::logInFile('sac', 'LicenseScan: ' . $e->getMessage() . "\n"); return 0; }
     }
 
+    public static function cronConfigScan(CronTask $task): int
+    {
+        if (!Config::get('compliance_scan_enabled')) { return 0; }
+        RunLog::sweepStale();
+        $run = RunLog::begin('config');
+        try {
+            \GlpiPlugin\Sac\Compliance\ConfigScan::run($run);
+            $run->finish('ok');
+            return 1;
+        } catch (\Throwable $e) {
+            $run->finish('error', $e->getMessage());
+            \Toolbox::logInFile('sac', 'ConfigScan: ' . $e->getMessage() . "\n");
+            return 0;
+        }
+    }
+
     /** @return array<string,callable():void> VM-only checks — they touch $DB. */
     public static function selfChecks(): array
     {
         return [
+            'db/configscan-riskregister-inactive' => static function (): void {
+                if (Config::get('compliance_scan_enabled') === 0 || Config::get('compliance_scan_enabled') === '0') {
+                    return;
+                }
+                if (\GlpiPlugin\Sac\FindingWriter::isAvailable()) {
+                    return; // skip: riskregister active, covered by ConfigScan's own checks
+                }
+                global $DB;
+                $floor = (int) ($DB->request(['SELECT' => ['MAX(id) AS m'], 'FROM' => 'glpi_plugin_sac_run'])->current()['m'] ?? 0);
+                try {
+                    $rc = self::cronConfigScan(new \CronTask());
+                    sac_assert($rc === 0 || $rc === 1, 'cronConfigScan returned a valid code without throwing');
+
+                    $row = $DB->request([
+                        'FROM'  => 'glpi_plugin_sac_run',
+                        'WHERE' => ['module' => 'config', 'id' => ['>', $floor]],
+                        'ORDER' => ['id DESC'],
+                    ])->current();
+                    sac_assert($row !== null, 'a _run row was opened for the tick');
+                    sac_assert_eq((string) $row['status'], 'ok', 'the _run row closed ok even with riskregister inactive');
+                } finally {
+                    $DB->delete('glpi_plugin_sac_run', ['module' => 'config', 'id' => ['>', $floor]]);
+                }
+            },
+
             // WRITER-1 (spec §9.2) — with riskregister inactive, a cron tick must
             // still complete cleanly and close its `_run` row `ok` (every write
             // degrades to a counter bump inside FindingWriter). Only meaningful
@@ -95,5 +137,6 @@ class Cron extends CommonDBTM
         CronTask::register(self::class, 'EolScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
         CronTask::register(self::class, 'EolCacheRefresh', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
         CronTask::register(self::class, 'LicenseScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
+        CronTask::register(self::class, 'ConfigScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
     }
 }
