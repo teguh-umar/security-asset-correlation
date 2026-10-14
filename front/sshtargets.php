@@ -121,6 +121,7 @@ foreach ($DB->request([
     $rows[] = [
         'id'            => (int) $row['id'],
         'computer_name' => (string) $row['computer_name'],
+        'computer_url'  => Computer::getFormURLWithID((int) $row['computers_id']),
         'host'          => (string) $row['host'],
         'port'          => (int) $row['port'],
         'ssh_user'      => (string) $row['ssh_user'],
