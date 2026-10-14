@@ -107,9 +107,16 @@ foreach ($DB->request([
 // Core helper, not hand-rolled markup (upgrade-resilience design principle,
 // project-brief.md §4) — a future GLPI version that moves this to Twig
 // changes the call site here, not every page that needs a Computer picker.
+//
+// `entity` is deliberately NOT passed: its default is -1, the only value
+// core treats as "all active entities". An earlier version passed the
+// string 'all', which looks reasonable but is not a value core accepts —
+// Session::getMatchingActiveEntities() falls through to its "Unexpected
+// value type" branch and returns an EMPTY array, so the dropdown was
+// restricted to zero entities and silently listed no Computers at all
+// (no error, no warning — just an empty picker).
 $computerDropdown = Dropdown::show('Computer', [
     'name'    => 'computers_id',
-    'entity'  => 'all',
     'display' => false,
 ]);
 
