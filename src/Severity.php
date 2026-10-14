@@ -45,6 +45,27 @@ final class Severity
         return 'Low';
     }
 
+    public static function forConfigScore(
+        float $score,
+        int $critical = 50,
+        int $high = 70,
+        int $medium = 85
+    ): ?string {
+        if ($score < $critical) {
+            return 'Critical';
+        }
+        if ($score < $high) {
+            return 'High';
+        }
+        if ($score < $medium) {
+            return 'Medium';
+        }
+        if ($score < 100.0) {
+            return 'Low';
+        }
+        return null;
+    }
+
     public static function selfChecks(): array
     {
         return [
@@ -72,6 +93,17 @@ final class Severity
             },
             'severity/license-zero-seats' => static function (): void {
                 sac_assert_eq(self::forLicenseOverage(5, 0, false), 'High', 'zero seats');
+            },
+            'severity/config-score-bands' => static function (): void {
+                sac_assert_eq(self::forConfigScore(40.0), 'Critical', 'below critical');
+                sac_assert_eq(self::forConfigScore(50.0), 'High', 'critical boundary is exclusive');
+                sac_assert_eq(self::forConfigScore(70.0), 'Medium', 'high boundary is exclusive');
+                sac_assert_eq(self::forConfigScore(85.0), 'Low', 'medium boundary is exclusive');
+                sac_assert_eq(self::forConfigScore(99.9), 'Low', 'just under full compliance');
+                sac_assert_eq(self::forConfigScore(100.0), null, 'fully compliant: no Finding');
+            },
+            'severity/config-score-custom-thresholds' => static function (): void {
+                sac_assert_eq(self::forConfigScore(60.0, 30, 60, 80), 'Medium', 'custom high boundary');
             },
         ];
     }
