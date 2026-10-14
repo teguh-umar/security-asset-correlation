@@ -20,6 +20,7 @@
                 <tr>
                     <th data-sortable>{{ __('Computer', 'sac') }}</th>
                     <th data-sortable>{{ __('Host', 'sac') }}</th>
+                    <th>{{ __('IP in GLPI inventory', 'sac') }}</th>
                     <th class="text-end">{{ __('Port', 'sac') }}</th>
                     <th data-sortable>{{ __('SSH user', 'sac') }}</th>
                     <th>{{ __('Active', 'sac') }}</th>
@@ -31,6 +32,16 @@
                 <tr>
                     <td>{{ r.computer_name }}</td>
                     <td>{{ r.host }}</td>
+                    <td class="small">
+                        {% if r.glpi_ips is empty %}
+                            <span class="text-muted">{{ __('none recorded', 'sac') }}</span>
+                        {% else %}
+                            <span class="{{ r.host_matches ? 'text-muted' : 'text-warning fw-bold' }}">{{ r.glpi_ips|join(', ') }}</span>
+                            {% if not r.host_matches %}
+                                <div class="text-warning small">{{ __('differs from the configured host', 'sac') }}</div>
+                            {% endif %}
+                        {% endif %}
+                    </td>
                     <td class="text-end">{{ r.port }}</td>
                     <td>{{ r.ssh_user }}</td>
                     <td>
@@ -72,7 +83,7 @@
     </div>
     <div class="card-body">
         <div class="alert alert-secondary">
-            {{ __('The Computer must already have the restricted SSH key installed and its oscap cron wrapper deployed — this form only registers it with SAC, it does not configure the host itself.', 'sac') }}
+            {{ __('Pick the Computer and save — the IP is taken from GLPI inventory unless you override it. The Computer must already have the restricted SSH key installed and its oscap cron wrapper deployed; this form only registers it with SAC, it does not configure the host itself.', 'sac') }}
         </div>
         <form method="post">
             <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
@@ -83,7 +94,8 @@
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">{{ __('Host / IP', 'sac') }}</label>
-                    <input type="text" name="host" class="form-control" placeholder="10.129.2.112" required>
+                    <input type="text" name="host" class="form-control" placeholder="{{ __('leave blank to use the IP from GLPI', 'sac') }}">
+                    <div class="form-hint">{{ __('Blank = take the Computer\'s IPv4 address from GLPI inventory. Fill it in only to override, e.g. a management interface GLPI has not inventoried.', 'sac') }}</div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">{{ __('Port', 'sac') }}</label>

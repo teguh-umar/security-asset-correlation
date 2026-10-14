@@ -1,6 +1,16 @@
 # Changelog
 
-## [1.7.1-rc2] - 2026-10-14
+## [1.7.1-rc3] - 2026-10-14
+
+### Added (rc2 → rc3)
+
+- **The SSH target's IP is taken from GLPI inventory.** Leave Host / IP
+  blank and SAC fills in the Computer's IPv4 address from
+  `glpi_ipaddresses` (loopback and IPv6 skipped); type one only to
+  override, e.g. a management interface GLPI has not inventoried. The
+  registered-targets list also shows what inventory currently knows next
+  to the configured host, flagging a drifted address instead of leaving it
+  to surface weeks later as a silently failing scan.
 
 ### Fixed (rc1 → rc2)
 

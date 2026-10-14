@@ -18,8 +18,25 @@ if (isset($_POST['add'])) {
     $port = (int) ($_POST['port'] ?? 22);
     $user = trim((string) ($_POST['ssh_user'] ?? 'pgnusr'));
 
+    // Left blank on purpose = "use what GLPI already knows". Inventory has
+    // already collected this Computer's addresses; making an admin retype
+    // one by hand is both busywork and a chance to typo a host that then
+    // silently fails to answer at cron time.
+    if ($host === '' && $cid > 0) {
+        $known = \GlpiPlugin\Sac\AssetResolver::ipAddressesForComputer($cid);
+        $host  = $known[0] ?? '';
+        if ($host === '') {
+            Session::addMessageAfterRedirect(
+                __('GLPI has no IPv4 address recorded for this Computer — enter the host or IP manually', 'sac'),
+                false,
+                ERROR
+            );
+            Html::back();
+        }
+    }
+
     if ($cid <= 0 || $host === '' || $user === '' || $port <= 0 || $port > 65535) {
-        Session::addMessageAfterRedirect(__('Computer, host and SSH user are required; port must be 1-65535', 'sac'), false, ERROR);
+        Session::addMessageAfterRedirect(__('Computer and SSH user are required; port must be 1-65535', 'sac'), false, ERROR);
         Html::back();
     }
 
@@ -94,6 +111,13 @@ foreach ($DB->request([
     ],
     'ORDER' => ['glpi_computers.name ASC'],
 ]) as $row) {
+    // What inventory currently knows, shown next to the configured host so
+    // a drifted address is visible instead of only showing up as a silently
+    // failing scan weeks later. Not auto-applied: the SSH host key in
+    // known_hosts is tied to the address, so a changed IP needs an
+    // ssh-keyscan anyway — this surfaces it, the admin decides.
+    $knownIps = \GlpiPlugin\Sac\AssetResolver::ipAddressesForComputer((int) $row['computers_id']);
+
     $rows[] = [
         'id'            => (int) $row['id'],
         'computer_name' => (string) $row['computer_name'],
@@ -101,6 +125,8 @@ foreach ($DB->request([
         'port'          => (int) $row['port'],
         'ssh_user'      => (string) $row['ssh_user'],
         'is_active'     => (bool) $row['is_active'],
+        'glpi_ips'      => $knownIps,
+        'host_matches'  => $knownIps === [] || in_array((string) $row['host'], $knownIps, true),
     ];
 }
 

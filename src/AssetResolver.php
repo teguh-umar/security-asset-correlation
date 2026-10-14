@@ -179,6 +179,49 @@ final class AssetResolver
     }
 
     /**
+     * The IPv4 addresses GLPI already knows for a Computer, so an admin
+     * never has to retype what inventory has already collected.
+     *
+     * Read straight off `glpi_ipaddresses.mainitemtype/mainitems_id`,
+     * which GLPI itself populates by walking NetworkName -> NetworkPort ->
+     * owning asset (`src/IPAddress.php::prepareInput()`), and which has its
+     * own `mainitem` index — so this needs no join through the networking
+     * tables.
+     *
+     * Loopback is skipped: it is never the address to SSH to. IPv6
+     * (`version` 6) is skipped too — the SSH target validation only accepts
+     * hostname/IPv4-shaped values, so returning one would produce a target
+     * that is silently rejected later.
+     *
+     * @return array<int,string> in GLPI's own order, first = most likely primary
+     */
+    public static function ipAddressesForComputer(int $computerId): array
+    {
+        global $DB;
+
+        $out = [];
+        foreach ($DB->request([
+            'SELECT' => ['name'],
+            'FROM'   => 'glpi_ipaddresses',
+            'WHERE'  => [
+                'mainitemtype' => 'Computer',
+                'mainitems_id' => $computerId,
+                'is_deleted'   => 0,
+                'version'      => 4,
+            ],
+            'ORDER'  => ['id ASC'],
+        ]) as $row) {
+            $ip = trim((string) $row['name']);
+            if ($ip === '' || str_starts_with($ip, '127.')) {
+                continue;
+            }
+            $out[] = $ip;
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /**
      * Every non-deleted, non-template Computer, optionally restricted to
      * {@see Config::scanScope()}. Used by modules whose source data is keyed
      * directly to a Computer (Module 3) rather than to an OS/Software id.
@@ -291,6 +334,45 @@ final class AssetResolver
                     $DB->delete('glpi_operatingsystems', ['id' => $osId]);
                 }
             },
+            'db/ip-addresses-for-computer' => static function (): void {
+                global $DB;
+                $cid = (int) (new \Computer())->add(['name' => '__sac_ip_host__', 'entities_id' => 0]);
+                try {
+                    // Seed the way GLPI itself stores it: the mainitem
+                    // columns are what this method reads, and they are what
+                    // IPAddress::prepareInput() fills in for a real agent
+                    // inventory.
+                    foreach ([
+                        ['name' => '127.0.0.1',    'version' => 4],
+                        ['name' => '10.129.2.112', 'version' => 4],
+                        ['name' => '10.129.2.200', 'version' => 4],
+                        ['name' => 'fe80::1',      'version' => 6],
+                    ] as $seed) {
+                        $DB->insert('glpi_ipaddresses', $seed + [
+                            'entities_id'  => 0,
+                            'itemtype'     => 'NetworkName',
+                            'items_id'     => 0,
+                            'mainitemtype' => 'Computer',
+                            'mainitems_id' => $cid,
+                            'is_deleted'   => 0,
+                        ]);
+                    }
+
+                    $ips = self::ipAddressesForComputer($cid);
+                    sac_assert_eq($ips, ['10.129.2.112', '10.129.2.200'], 'returns the routable IPv4 addresses, in GLPI order');
+                    sac_assert(!in_array('127.0.0.1', $ips, true), 'loopback excluded — never the address to SSH to');
+                    sac_assert(!in_array('fe80::1', $ips, true), 'IPv6 excluded — the SSH target validation would reject it anyway');
+
+                    $DB->update('glpi_ipaddresses', ['is_deleted' => 1], ['mainitems_id' => $cid, 'name' => '10.129.2.112']);
+                    sac_assert_eq(self::ipAddressesForComputer($cid), ['10.129.2.200'], 'a soft-deleted address drops out');
+
+                    sac_assert_eq(self::ipAddressesForComputer(2147480996), [], 'a computer with no addresses returns an empty list, not an error');
+                } finally {
+                    $DB->delete('glpi_ipaddresses', ['mainitemtype' => 'Computer', 'mainitems_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
             'db/active-computers' => static function (): void {
                 global $DB;
                 $cId = 0; $cId2 = 0;
