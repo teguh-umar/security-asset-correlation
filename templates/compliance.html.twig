@@ -1,0 +1,50 @@
+{#
+ # SAC — config-compliance (OpenSCAP Tier 1) per-host score list.
+ # Autoescape ON — no |raw on plugin data.
+ # `rows` = [{computer_name, benchmark_id, score, pass_count, fail_count,
+ #           other_count, date_collected, is_stale}], ascending by score.
+ #}
+<div class="card">
+    <div class="card-body">
+    <div class="alert alert-secondary">
+        {{ __('Tier 1: one score per host from the OpenSCAP summary GLPI Agent\'s Collect task reports. Per-rule results are not imported in this phase.', 'sac') }}
+    </div>
+    {% if rows is empty %}
+        <div class="text-center text-muted">{{ __('No config-compliance data collected yet', 'sac') }}</div>
+    {% else %}
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th data-sortable>{{ __('Host', 'sac') }}</th>
+                    <th data-sortable>{{ __('Benchmark', 'sac') }}</th>
+                    <th data-sortable>{{ __('Score', 'sac') }}</th>
+                    <th class="text-end">{{ __('Pass', 'sac') }}</th>
+                    <th class="text-end">{{ __('Fail', 'sac') }}</th>
+                    <th class="text-end">{{ __('Other', 'sac') }}</th>
+                    <th data-sortable>{{ __('Last reported', 'sac') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                {% set sc_class = r.score < 50 ? 'text-danger fw-bold' : (r.score < 85 ? 'text-warning fw-bold' : 'text-success') %}
+                <tr>
+                    <td>{{ r.computer_name }}</td>
+                    <td class="text-muted small">{{ r.benchmark_id }}</td>
+                    <td data-sort="{{ r.score }}" class="{{ sc_class }}">{{ r.score }}%</td>
+                    <td class="text-end">{{ r.pass_count }}</td>
+                    <td class="text-end">{{ r.fail_count }}</td>
+                    <td class="text-end">{{ r.other_count }}</td>
+                    <td>
+                        {{ r.date_collected ?: __('Never', 'sac') }}
+                        {% if r.is_stale %}
+                            <span class="badge bg-secondary text-white ms-1">{{ __('Stale', 'sac') }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% include '@sac/_sortable-table.html.twig' %}
+    {% endif %}
+    </div>
+</div>
