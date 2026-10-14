@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.7.0] - 2026-10-14
+
+### Added
+
+- **Module 3 Phase 1 — Config compliance (OpenSCAP Tier 1).** Reads the
+  one-line `oscap` summary GLPI Agent's Collect task reports per host
+  (score, pass/fail/other counts, benchmark id, timestamp), stores the
+  latest reading per `Computer`, and emits a Finding into `riskregister`
+  when a host's score falls below a configurable threshold (category
+  `Configuration Compliance`). New "Config compliance" dashboard page lists
+  every host's latest score, flags hosts whose Collect data has gone stale,
+  and clears a Finding automatically once a host reports 100%. New weekly
+  cron `ConfigScan`; new Setup section with the collect-task name and the
+  Critical/High/Medium score thresholds.
+- Full per-rule checklist (Open/Not a Finding/Not Applicable/Not Reviewed),
+  OVAL patch-state detail, and POA&M are **not** part of this phase — they
+  need the full `results.xml`/ARF pull (Tier 2), deferred pending a
+  transport decision (SSH vs Kerberos/GSSAPI).
+
 ## [1.6.1] - 2026-10-06
 
 ### Added
