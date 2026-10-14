@@ -139,6 +139,28 @@ final class Migration
               PRIMARY KEY (`id`),
               UNIQUE KEY `computer` (`computers_id`)
             ) $table_options";
+
+        // v1.7.1: opt-in SSH pull targets, replacing the v1.7.0 design that
+        // assumed GLPI Inventory's Collect feature could capture arbitrary
+        // command output. VM verification showed Collect only supports
+        // file-metadata/registry/WMI collection (none fit a Linux cron's
+        // text output), so Module 3 Tier 1 now pulls the oscap summary line
+        // over a restricted, forced-command SSH key instead — one row per
+        // admin-registered Computer, never auto-discovered from inventory
+        // network data.
+        self::$tables['glpi_plugin_sac_sshtargets'] = "
+            CREATE TABLE `glpi_plugin_sac_sshtargets` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `computers_id` int unsigned NOT NULL DEFAULT 0,
+              `host` varchar(255) NOT NULL DEFAULT '',
+              `port` int unsigned NOT NULL DEFAULT 22,
+              `ssh_user` varchar(100) NOT NULL DEFAULT 'pgnusr',
+              `is_active` tinyint(1) NOT NULL DEFAULT 1,
+              `date_creation` timestamp NULL DEFAULT NULL,
+              `date_mod` timestamp NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `computer` (`computers_id`)
+            ) $table_options";
     }
 
     /**
@@ -343,6 +365,16 @@ final class Migration
                 sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'computers_id'), 'computers_id column');
                 sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'score'), 'score column');
                 sac_assert(self::keyExists($DB, 'glpi_plugin_sac_configscan', 'computer'), 'UNIQUE key on computers_id');
+            },
+
+            'db/migration-sshtargets-table' => static function (): void {
+                global $DB;
+                sac_assert($DB->tableExists('glpi_plugin_sac_sshtargets'), 'table created by install()');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_sshtargets', 'computers_id'), 'computers_id column');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_sshtargets', 'host'), 'host column');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_sshtargets', 'port'), 'port column');
+                sac_assert($DB->fieldExists('glpi_plugin_sac_sshtargets', 'ssh_user'), 'ssh_user column');
+                sac_assert(self::keyExists($DB, 'glpi_plugin_sac_sshtargets', 'computer'), 'UNIQUE key on computers_id — one target row per Computer');
             },
             'db/migration-eolmap-key' => static function (): void {
                 global $DB;
