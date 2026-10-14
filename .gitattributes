@@ -7,3 +7,8 @@
 # just the local checkout).
 lib/pgnsuite/ConfigTab.php -text
 lib/pgnsuite/Menu.php -text
+
+# Host-deployed shell script (runs on a Linux target, not through this
+# plugin) — same autocrlf hazard as above: a CRLF shebang or CRLF inside
+# the script's embedded python3 heredoc would break it outright on Linux.
+tools/host-agent/sac-oscap-summary.sh -text
