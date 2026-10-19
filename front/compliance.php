@@ -44,6 +44,7 @@ foreach ($DB->request([
         // hand-built path. Passed as a plain string and linked in the
         // template, keeping the "no |raw on plugin data" rule intact.
         'computer_url'   => Computer::getFormURLWithID((int) $row['computers_id']),
+        'detail_url'     => Html::getPrefixedUrl('/plugins/sac/front/compliancedetail.php?computers_id=' . (int) $row['computers_id']),
         'benchmark_id'   => (string) $row['benchmark_id'],
         'score'          => (float) $row['score'],
         'pass_count'     => (int) $row['pass_count'],
