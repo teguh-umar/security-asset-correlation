@@ -99,9 +99,21 @@ final class ConfigScan
         global $DB;
         $cid = $target['computers_id'];
 
-        $parsed = ScoreLine::parse($value);
-        if ($parsed === null) {
+        // A pull is one summary line plus zero or more rule lines. Split
+        // first: a payload with no summary line is unusable, and must NOT
+        // reach RuleStore::sync() — an empty rule list there resolves every
+        // open rule on the host, so a truncated transfer would read as
+        // "everything got fixed".
+        $payload = SummaryPayload::split($value);
+        if ($payload['summary'] === null) {
             Reconcile::note('config', 'Computer', $cid, 0, 'bad_summary', $value);
+            $run->bump('errors');
+            return;
+        }
+
+        $parsed = ScoreLine::parse($payload['summary']);
+        if ($parsed === null) {
+            Reconcile::note('config', 'Computer', $cid, 0, 'bad_summary', $payload['summary']);
             $run->bump('errors');
             return;
         }
@@ -133,6 +145,18 @@ final class ConfigScan
             $DB->insert('glpi_plugin_sac_configscan', $scanRow);
         }
 
+        // Only reached with a summary that parsed, so an empty $rules here
+        // genuinely means "this scan found nothing failing" — not "the pull
+        // failed", which returned above.
+        $rules = [];
+        foreach ($payload['rules'] as $ruleLine) {
+            $rule = RuleLine::parse($ruleLine);
+            if ($rule !== null) {
+                $rules[] = $rule;
+            }
+        }
+        RuleStore::sync($cid, $rules, $parsed['date_scan']);
+
         $code = Code::configScore($cid);
         $sev  = Severity::forConfigScore($parsed['score'], $critical, $high, $medium);
 
@@ -156,6 +180,25 @@ final class ConfigScan
             $parsed['date_scan'],
             $stale ? "\n\n[STALE — host's own scan timestamp is over {$staleDays} days old]" : ''
         );
+
+        // A digest of the worst open rules, so the Finding alone is enough
+        // to start mitigating. The full checklist lives on SAC's own page —
+        // 55 rules in one text field is unreadable, which is the complaint
+        // this whole phase exists to answer.
+        $openRules = RuleStore::openFor($cid);
+        if ($openRules !== []) {
+            $content .= "\n\n" . __('Top failing rules:', 'sac');
+            foreach (array_slice($openRules, 0, 10) as $r) {
+                $content .= sprintf("\n- [%s] %s", (string) $r['severity'], (string) $r['title']);
+            }
+            $remaining = count($openRules) - 10;
+            if ($remaining > 0) {
+                $content .= "\n" . sprintf(
+                    __('…and %d more — see Config compliance in SAC for the full checklist.', 'sac'),
+                    $remaining
+                );
+            }
+        }
 
         $entity = $target['entities_id'];
 
@@ -183,7 +226,13 @@ final class ConfigScan
             'plugin_riskregister_riskcategories_id' => $catId,
         ];
 
-        FindingWriter::upsert($input, [$cid], '', $run);
+        $findingId = FindingWriter::upsert($input, [$cid], '', $run);
+        if ($findingId !== null) {
+            // Open AND resolved rules: a fixed item should show as Resolved
+            // on the Finding, not vanish from it. No-op until riskregister
+            // 2.1.0 is installed (FindingAffected guards on method_exists).
+            FindingAffected::push($findingId, RuleStore::allFor($cid));
+        }
     }
 
     /**
@@ -361,6 +410,61 @@ final class ConfigScan
                     foreach (array_keys($f->find(['entities_id' => 0, 'code' => $code])) as $fid) {
                         $f->delete(['id' => (int) $fid], true);
                     }
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            'db/configscan-processtarget-persists-rules' => static function (): void {
+                global $DB;
+                $cid = (int) (new \Computer())->add(['name' => '__sac_pt_rules__', 'entities_id' => 0]);
+                $target = ['computers_id' => $cid, 'entities_id' => 0, 'name' => '__sac_pt_rules__'];
+                $catId = FindingWriter::categoryId('Configuration Compliance', 0);
+                try {
+                    $payload = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n"
+                             . "SACRULE1|rule_a|fail|high|CISv8:4.1|Disable root login\n"
+                             . "SACRULE1|rule_b|fail|low||Set umask\n";
+                    $run = RunLog::begin('selftest');
+                    self::processTarget($target, $payload, $catId, null, $run);
+                    $run->finish('ok');
+
+                    $rows = iterator_to_array($DB->request([
+                        'FROM'  => 'glpi_plugin_sac_configrules',
+                        'WHERE' => ['computers_id' => $cid],
+                    ]));
+                    sac_assert_eq(count($rows), 2, 'both rules persisted');
+                } finally {
+                    $DB->delete('glpi_plugin_sac_configrules', ['computers_id' => $cid]);
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            // Review Focus #1 end-to-end: a payload whose summary line was
+            // lost must leave existing open rules alone. The naive reading
+            // of "no summary, two rule lines missing" is "zero failing", and
+            // RuleStore::sync() would then resolve the lot.
+            'db/configscan-truncated-payload-resolves-nothing' => static function (): void {
+                global $DB;
+                $cid = (int) (new \Computer())->add(['name' => '__sac_pt_trunc__', 'entities_id' => 0]);
+                $target = ['computers_id' => $cid, 'entities_id' => 0, 'name' => '__sac_pt_trunc__'];
+                $catId = FindingWriter::categoryId('Configuration Compliance', 0);
+                try {
+                    $good = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n"
+                          . "SACRULE1|rule_a|fail|high||Disable root login\n";
+                    $run = RunLog::begin('selftest');
+                    self::processTarget($target, $good, $catId, null, $run);
+
+                    sac_assert_eq(count(RuleStore::openFor($cid)), 1, 'one rule open after the good scan');
+
+                    // Same host, next run, payload truncated to nothing usable.
+                    self::processTarget($target, "garbage with no summary line\n", $catId, null, $run);
+                    $run->finish('ok');
+
+                    sac_assert_eq(count(RuleStore::openFor($cid)), 1, 'the open rule survives an unusable pull — it is NOT silently resolved');
+                } finally {
+                    $DB->delete('glpi_plugin_sac_reconcile', ['ref_itemtype' => 'Computer', 'ref_id' => $cid]);
+                    $DB->delete('glpi_plugin_sac_configrules', ['computers_id' => $cid]);
                     $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
                     (new \Computer())->delete(['id' => $cid], true);
                 }
