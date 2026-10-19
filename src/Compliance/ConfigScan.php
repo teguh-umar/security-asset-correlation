@@ -415,6 +415,15 @@ final class ConfigScan
                 }
             },
 
+            // The dashboard links to this page by URL rather than through
+            // the menu, so Menu's own page-exists loop does not cover it.
+            'compliancedetail/page-exists' => static function (): void {
+                sac_assert(
+                    is_file(dirname(__DIR__, 2) . '/front/compliancedetail.php'),
+                    'the per-host checklist page the dashboard links to exists'
+                );
+            },
+
             'db/configscan-processtarget-persists-rules' => static function (): void {
                 global $DB;
                 $cid = (int) (new \Computer())->add(['name' => '__sac_pt_rules__', 'entities_id' => 0]);
