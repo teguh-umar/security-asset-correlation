@@ -39,6 +39,13 @@ agreement; where this plan and they disagree, they win.
 - **Framework refs pass through verbatim.** Send `CISv8:4.1` exactly as the content
   states it, normalised only to `shortname:code`. Never map or re-interpret — a
   mismatch must surface in riskregister's `refs_unmatched`, not be smoothed over.
+- **Omitting a field is not the same as sending it empty** (riskregister contract
+  change, hub §7 2026-10-19). An omitted key leaves the stored value alone; `''`
+  erases it. SAC therefore never sends `description` (a human's remediation note
+  lives there) and omits `framework_refs` entirely when the content produced none.
+- **riskregister 2.1.0-rc1 is built but NOT deployed.** Code against the contract,
+  keep the `method_exists()` guard, and do not assume the method exists at runtime
+  until the user confirms it on VM-HQ-GLPI.
 - **No `authorized_keys` change on any host.** If a task seems to need one, stop:
   that is Design B, which was explicitly rejected.
 - Existing suite rules still bind: `timestamp NULL DEFAULT NULL`, `'fkey'` (never
@@ -728,6 +735,28 @@ rows keyed by `external_key`, returning `['inserted','updated','skipped','contro
     sac_assert_eq($rows[1]['severity'], 'Info', 'unknown severity maps onto Info');
     sac_assert_eq($rows[1]['state'], 'Resolved', 'resolved maps onto Resolved');
 },
+
+// Both of these pin riskregister's 2026-10-19 contract change: a field
+// that is OMITTED leaves the stored value alone, while a field sent as ''
+// actively empties it. Getting this wrong means a monthly scan quietly
+// wipes what a person wrote.
+'affected/never-sends-description' => static function (): void {
+    $rows = FindingAffected::rowsFor([
+        ['rule_id' => 'rule_a', 'severity' => 'high', 'title' => 'Disable root login', 'framework_refs' => '', 'state' => 'open'],
+    ]);
+    sac_assert(!array_key_exists('description', $rows[0]), 'description is never sent: it is the one field a human writes the remediation note into, and SAC has nothing to say about it that is worth overwriting a person every month');
+},
+'affected/omits-empty-framework-refs' => static function (): void {
+    $withRefs = FindingAffected::rowsFor([
+        ['rule_id' => 'r1', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv8:4.1', 'state' => 'open'],
+    ]);
+    sac_assert_eq($withRefs[0]['framework_refs'], 'CISv8:4.1', 'refs sent when the content actually had some');
+
+    $noRefs = FindingAffected::rowsFor([
+        ['rule_id' => 'r2', 'severity' => 'low', 'title' => 't', 'framework_refs' => '', 'state' => 'open'],
+    ]);
+    sac_assert(!array_key_exists('framework_refs', $noRefs[0]), 'no refs = key omitted, NOT sent as empty — sending "" would erase refs that a later benchmark or a human supplied');
+},
 'affected/absent-riskregister-is-safe' => static function (): void {
     if (FindingAffected::isAvailable()) {
         return;
@@ -776,6 +805,18 @@ final class FindingAffected
     /**
      * PURE. Maps stored rule rows onto the contract's row shape.
      *
+     * Per riskregister's 2026-10-19 contract change, an OMITTED key means
+     * "I am saying nothing about this field, keep what is stored", while a
+     * key sent as '' means "empty it". Two consequences, both deliberate:
+     *
+     *  - `description` is NEVER sent. It is where a person writes the
+     *    remediation note, and the only thing SAC could put there is
+     *    boilerplate restating the rule id. Sending it would overwrite that
+     *    note on every monthly scan.
+     *  - `framework_refs` is sent only when the content actually produced
+     *    some. Sending '' for a rule with no CIS reference would erase refs
+     *    that a later benchmark version, or a human, supplied.
+     *
      * @param array<int,array<string,mixed>> $rules
      * @return array<int,array<string,string>>
      */
@@ -783,16 +824,19 @@ final class FindingAffected
     {
         $rows = [];
         foreach ($rules as $r) {
-            $rows[] = [
-                'external_key'   => (string) $r['rule_id'],
-                'label'          => (string) $r['title'],
-                'description'    => sprintf('SCAP rule %s (%s)', (string) $r['rule_id'], (string) $r['result'] ?? 'fail'),
-                'severity'       => self::SEVERITY_MAP[(string) $r['severity']] ?? 'Info',
-                'state'          => self::STATE_MAP[(string) $r['state']] ?? 'Open',
-                // Verbatim, per the contract: a shape mismatch must surface
-                // in riskregister's refs_unmatched, not be smoothed over here.
-                'framework_refs' => (string) $r['framework_refs'],
+            $row = [
+                'external_key' => (string) $r['rule_id'],
+                'label'        => (string) $r['title'],
+                'severity'     => self::SEVERITY_MAP[(string) $r['severity']] ?? 'Info',
+                'state'        => self::STATE_MAP[(string) $r['state']] ?? 'Open',
             ];
+            // Verbatim, per the contract: a shape mismatch must surface in
+            // riskregister's refs_unmatched, not be smoothed over here.
+            $refs = trim((string) ($r['framework_refs'] ?? ''));
+            if ($refs !== '') {
+                $row['framework_refs'] = $refs;
+            }
+            $rows[] = $row;
         }
         return $rows;
     }
