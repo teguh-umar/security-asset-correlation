@@ -41,7 +41,12 @@ final class Config
         'compliance_score_critical'    => 50,
         'compliance_score_high'        => 70,
         'compliance_score_medium'      => 85,
-        'compliance_stale_days'        => 14,
+        // 45, not 14: config-compliance scanning is monthly on both sides
+        // (host cron and ConfigScan), so a freshly-pulled file is routinely
+        // ~30 days old. A 14-day threshold would mark every host STALE
+        // permanently. Fresh installs only — Config::setDefaults() never
+        // overwrites a value an existing instance already stored.
+        'compliance_stale_days'        => 45,
     ];
 
     /**
@@ -318,6 +323,7 @@ final class Config
             'config/defaults-shape' => static function (): void {
                 sac_assert_eq(array_intersect(self::REMOVED, array_keys(self::DEFAULTS)), [], 'no removed key is still a setting');
                 sac_assert_eq(self::DEFAULTS['license_check_overdeployment'], 0, '2b off by default');
+                sac_assert_eq(self::DEFAULTS['compliance_stale_days'], 45, 'stale threshold matches the monthly cadence — at 14 a monthly scan of a monthly-refreshed file would flag every host STALE permanently');
                 $cats = json_decode(self::DEFAULTS['license_ignore_categories'], true);
                 sac_assert_eq($cats, ['system_component'], 'ignore cats seed');
                 sac_assert_eq(self::DEFAULTS['compliance_scan_enabled'], 1, 'config compliance scan on by default');
