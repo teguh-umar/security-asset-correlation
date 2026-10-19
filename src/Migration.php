@@ -161,6 +161,32 @@ final class Migration
               PRIMARY KEY (`id`),
               UNIQUE KEY `computer` (`computers_id`)
             ) $table_options";
+
+        // v1.8.0: Tier 2 — one row per failing SCAP rule per host.
+        // `(computers_id, rule_id)` is a safe UNIQUE because rule_id is a
+        // SCAP id and never empty — unlike the polymorphic
+        // `(x_id, itemtype, items_id)` shape riskregister hit (hub §7
+        // 2026-10-15), where every untargeted row shares ('' , 0) and the
+        // index silently permits only ONE of them.
+        self::$tables['glpi_plugin_sac_configrules'] = "
+            CREATE TABLE `glpi_plugin_sac_configrules` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `computers_id` int unsigned NOT NULL DEFAULT 0,
+              `rule_id` varchar(255) NOT NULL DEFAULT '',
+              `result` varchar(20) NOT NULL DEFAULT '',
+              `severity` varchar(20) NOT NULL DEFAULT 'unknown',
+              `framework_refs` varchar(255) NOT NULL DEFAULT '',
+              `title` text,
+              `state` varchar(20) NOT NULL DEFAULT 'open',
+              `date_first_seen` timestamp NULL DEFAULT NULL,
+              `date_last_seen` timestamp NULL DEFAULT NULL,
+              `date_resolved` timestamp NULL DEFAULT NULL,
+              `date_creation` timestamp NULL DEFAULT NULL,
+              `date_mod` timestamp NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `computer_rule` (`computers_id`,`rule_id`),
+              KEY `computer_state` (`computers_id`,`state`)
+            ) $table_options";
     }
 
     /**
@@ -365,6 +391,19 @@ final class Migration
                 sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'computers_id'), 'computers_id column');
                 sac_assert($DB->fieldExists('glpi_plugin_sac_configscan', 'score'), 'score column');
                 sac_assert(self::keyExists($DB, 'glpi_plugin_sac_configscan', 'computer'), 'UNIQUE key on computers_id');
+            },
+
+            'db/migration-configrules-table' => static function (): void {
+                global $DB;
+                $t = 'glpi_plugin_sac_configrules';
+                sac_assert($DB->tableExists($t), 'table created by install()');
+                foreach ([
+                    'computers_id', 'rule_id', 'result', 'severity', 'framework_refs',
+                    'title', 'state', 'date_first_seen', 'date_last_seen', 'date_resolved',
+                ] as $col) {
+                    sac_assert($DB->fieldExists($t, $col), "$col column");
+                }
+                sac_assert(self::keyExists($DB, $t, 'computer_rule'), 'UNIQUE key on (computers_id, rule_id)');
             },
 
             'db/migration-sshtargets-table' => static function (): void {
