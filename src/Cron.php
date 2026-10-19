@@ -137,6 +137,11 @@ class Cron extends CommonDBTM
         CronTask::register(self::class, 'EolScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
         CronTask::register(self::class, 'EolCacheRefresh', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
         CronTask::register(self::class, 'LicenseScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
-        CronTask::register(self::class, 'ConfigScan', WEEK_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
+        // MONTH_TIMESTAMP, matching the cadence the user set on the VM and
+        // the 45-day stale threshold in Config. Fresh installs only:
+        // CronTask::register() returns early for a task that already exists
+        // (verified in core), so this never moves an instance that is
+        // already registered — that is a UI change.
+        CronTask::register(self::class, 'ConfigScan', MONTH_TIMESTAMP, ['state' => CronTask::STATE_WAITING, 'mode' => CronTask::MODE_EXTERNAL]);
     }
 }
