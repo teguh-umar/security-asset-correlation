@@ -104,14 +104,14 @@ final class FindingAffected
         return [
             'affected/maps-rule-to-row' => static function (): void {
                 $rows = self::rowsFor([
-                    ['rule_id' => 'rule_a', 'severity' => 'high', 'title' => 'Disable root login', 'framework_refs' => 'CISv8:4.1', 'state' => 'open'],
+                    ['rule_id' => 'rule_a', 'severity' => 'high', 'title' => 'Disable root login', 'framework_refs' => 'CISv7:4', 'state' => 'open'],
                     ['rule_id' => 'rule_b', 'severity' => 'unknown', 'title' => 'Set umask', 'framework_refs' => '', 'state' => 'resolved'],
                 ]);
                 sac_assert_eq(count($rows), 2, 'one row per rule');
                 sac_assert_eq($rows[0]['external_key'], 'rule_a', 'SCAP rule id is the upsert key');
                 sac_assert_eq($rows[0]['severity'], 'High', 'SCAP high maps onto riskregister High');
                 sac_assert_eq($rows[0]['state'], 'Open', 'open maps onto Open');
-                sac_assert_eq($rows[0]['framework_refs'], 'CISv8:4.1', 'refs passed through verbatim, never re-interpreted');
+                sac_assert_eq($rows[0]['framework_refs'], 'CISv7:4', 'refs passed through verbatim, never re-interpreted');
                 sac_assert_eq($rows[1]['severity'], 'Info', 'unknown severity maps onto Info');
                 sac_assert_eq($rows[1]['state'], 'Resolved', 'resolved maps onto Resolved');
             },
@@ -129,14 +129,33 @@ final class FindingAffected
 
             'affected/omits-empty-framework-refs' => static function (): void {
                 $withRefs = self::rowsFor([
-                    ['rule_id' => 'r1', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv8:4.1', 'state' => 'open'],
+                    ['rule_id' => 'r1', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:4', 'state' => 'open'],
                 ]);
-                sac_assert_eq($withRefs[0]['framework_refs'], 'CISv8:4.1', 'refs sent when the content actually had some');
+                sac_assert_eq($withRefs[0]['framework_refs'], 'CISv7:4', 'refs sent when the content actually had some');
 
                 $noRefs = self::rowsFor([
                     ['rule_id' => 'r2', 'severity' => 'low', 'title' => 't', 'framework_refs' => '', 'state' => 'open'],
                 ]);
                 sac_assert(!array_key_exists('framework_refs', $noRefs[0]), 'no refs = key omitted, NOT sent as empty — "" would erase refs a later benchmark or a human supplied');
+            },
+
+            // The OL9 SSG content references CIS Controls **v7** (codes run to
+            // 20; v8 has only 18). Orchestrator ruling, hub §7 2026-10-22: send
+            // them as `CISv7:<n>` exactly as the content states. riskregister
+            // has no CISv7 framework, so every ref lands as stored text and is
+            // counted in `refs_unmatched` — nothing is mislinked, and a later
+            // v7->v8 mapping still has the original data to work from. The
+            // danger this pins is the opposite: any "helpful" clamping of 19/20
+            // into v8's 1-18 range would silently point at the wrong control.
+            'affected/passes-cisv7-codes-through-untouched' => static function (): void {
+                $rows = self::rowsFor([
+                    ['rule_id' => 'r19', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:19', 'state' => 'open'],
+                    ['rule_id' => 'r20', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:20', 'state' => 'open'],
+                    ['rule_id' => 'rmulti', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:4,CISv7:20', 'state' => 'open'],
+                ]);
+                sac_assert_eq($rows[0]['framework_refs'], 'CISv7:19', 'code 19 has no v8 equivalent and is still sent verbatim, never dropped or clamped');
+                sac_assert_eq($rows[1]['framework_refs'], 'CISv7:20', 'code 20 likewise: out of v8 range is not a reason to rewrite it');
+                sac_assert_eq($rows[2]['framework_refs'], 'CISv7:4,CISv7:20', 'a multi-ref list keeps both codes and their order');
             },
 
             'db/affected-absent-riskregister-is-safe' => static function (): void {
