@@ -237,6 +237,20 @@ final class ConfigScan
             // it are dropped whole rather than cut mid-ref. Recorded against
             // the host so it shows in Reconcile, because the content DID
             // supply those refs and nothing else would ever say they are gone.
+            // Malformed refs mean SAC's OWN host wrapper emitted something
+            // unparseable — never riskregister's fault, and invisible there
+            // because they are removed before the wire.
+            if (!empty($pushed['refs_malformed'])) {
+                Reconcile::note(
+                    'config',
+                    'Computer',
+                    $cid,
+                    0,
+                    'refs_malformed',
+                    sprintf('%d unparseable framework ref(s) from the host wrapper', (int) $pushed['refs_malformed'])
+                );
+            }
+
             if (!empty($pushed['refs_dropped'])) {
                 Reconcile::note(
                     'config',

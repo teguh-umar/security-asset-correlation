@@ -65,28 +65,53 @@ final class FindingAffected
      * repeated framework:code pair. `dropped` means "a distinct ref the
      * content supplied that did not fit".
      *
-     * @return array{refs: string, dropped: int, sent: int}
+     * @return array{refs: string, dropped: int, malformed: int, sent: int}
      */
     public static function capRefs(string $refs): array
     {
         $refs = trim($refs);
         if ($refs === '') {
-            return ['refs' => '', 'dropped' => 0, 'sent' => 0];
+            return ['refs' => '', 'dropped' => 0, 'malformed' => 0, 'sent' => 0];
         }
 
         // No "it already fits" shortcut: dedup and whitespace normalisation
         // have to happen to every list, not only the oversized ones, or a
         // short list keeps duplicates that make `sent` disagree with
         // riskregister's parsed count.
-        $kept    = [];
-        $dropped = 0;
-        $len     = 0;
-        $seen    = [];
+        $kept      = [];
+        $dropped   = 0;
+        $malformed = 0;
+        $len       = 0;
+        $seen      = [];
         foreach (explode(',', $refs) as $ref) {
             $ref = trim($ref);
             if ($ref === '') {
                 continue;
             }
+
+            // Normalise to exactly what riskregister's RefList::parse() will
+            // make of this chunk, BEFORE dedup and before measuring length.
+            // Their rules (their unit tests, relayed 2026-10-22): trim around
+            // the pair and around each part, so `CISv7: 4` is `CISv7:4`;
+            // split on the FIRST colon only, because a ref_code may itself
+            // contain one; drop a malformed entry entirely.
+            //
+            // Sending the raw form instead would be a silent count mismatch:
+            // `CISv7: 4,CISv7:4` is two refs to us and one to them, and 2.2.0
+            // refuses the row — a failure that looks like truncation and
+            // sends the investigation to the wrong place.
+            if (!str_contains($ref, ':')) {
+                $malformed++;
+                continue;
+            }
+            [$framework, $code] = explode(':', $ref, 2);
+            $framework = trim($framework);
+            $code      = trim($code);
+            if ($framework === '' || $code === '') {
+                $malformed++;
+                continue;
+            }
+            $ref = $framework . ':' . $code;
             // Deduplicate on the way in. riskregister's RefList::parse()
             // discards a repeated framework:code pair anyway, so a duplicate
             // buys nothing and spends the scarce 255 — it can push a DISTINCT
@@ -109,11 +134,15 @@ final class FindingAffected
         }
 
         return [
-            'refs'    => implode(',', $kept),
-            'dropped' => $dropped,
+            'refs'      => implode(',', $kept),
+            'dropped'   => $dropped,
+            // Not a length problem and not riskregister's to report: these
+            // never reach it. A malformed ref means SAC's own host wrapper
+            // emitted something unparseable, so it is ours to surface.
+            'malformed' => $malformed,
             // What riskregister 2.2.0 will compare against its own parse of
             // the string: the number of refs actually in what we send.
-            'sent'    => count($kept),
+            'sent'      => count($kept),
         ];
     }
 
@@ -138,9 +167,10 @@ final class FindingAffected
      *                 want the rows keep working unchanged.
      * @return array<int,array<string,string>>
      */
-    public static function rowsFor(array $rules, ?int &$refsDropped = null): array
+    public static function rowsFor(array $rules, ?int &$refsDropped = null, ?int &$refsMalformed = null): array
     {
-        $refsDropped = 0;
+        $refsDropped   = 0;
+        $refsMalformed = 0;
         $rows = [];
         foreach ($rules as $r) {
             $row = [
@@ -152,7 +182,8 @@ final class FindingAffected
             // Verbatim, per the contract: a shape mismatch must surface in
             // riskregister's refs_unmatched, not be smoothed over here.
             $capped = self::capRefs((string) ($r['framework_refs'] ?? ''));
-            $refsDropped += $capped['dropped'];
+            $refsDropped   += $capped['dropped'];
+            $refsMalformed += $capped['malformed'];
             if ($capped['refs'] !== '') {
                 $row['framework_refs'] = $capped['refs'];
                 // riskregister 2.2.0 will refuse a row whose parsed ref count
@@ -179,14 +210,15 @@ final class FindingAffected
             return null;
         }
 
-        $rows    = self::rowsFor($rules, $refsDropped);
+        $rows    = self::rowsFor($rules, $refsDropped, $refsMalformed);
         $result  = \GlpiPlugin\Riskregister\Finding_Item::upsertAffected($findingId, $rows);
 
         // Surfaced to the caller, which knows the Computer this scan was for
         // and can record it against that host. Returned rather than logged
         // only, because a ref lost to the column width is data the content
         // did supply, and nobody would ever go looking for it in a log.
-        $result['refs_dropped'] = (int) $refsDropped;
+        $result['refs_dropped']   = (int) $refsDropped;
+        $result['refs_malformed'] = (int) $refsMalformed;
 
         if (!empty($result['refs_unmatched'])) {
             // Not an error on either side: it means SAC's reference codes
@@ -358,6 +390,12 @@ final class FindingAffected
                     'plain'      => 'CISv7:4,CISv7:19',
                     'duplicates' => 'CISv7:4,CISv7:4,CISv7:19',
                     'untidy'     => ' CISv7:4 , , CISv7:19 ',
+                    // riskregister's RefList::parse() normalisations, relayed
+                    // from its unit tests 2026-10-22. Each of these sends a
+                    // different count than the raw string suggests.
+                    'inner space' => 'CISv7: 4,CISv7:4',
+                    'malformed'   => 'CISv7:4,junk,CISv7:,:19,CISv7:19',
+                    'colon code'  => 'CISv7:4:a,CISv7:4:a,CISv7:19',
                     'overflowing' => implode(',', array_map(
                         static fn(int $i): string => 'CISv7:' . $i,
                         range(1, 40)
@@ -382,6 +420,26 @@ final class FindingAffected
                     ['rule_id' => 'r0', 'severity' => 'low', 'title' => 't', 'framework_refs' => '', 'state' => 'open'],
                 ]);
                 sac_assert(!array_key_exists('framework_refs_sent', $none[0]), 'no refs sent = no count sent');
+            },
+
+            // The normalisation itself, stated as values rather than as a
+            // count, so a regression says what changed and not merely that a
+            // number moved.
+            'affected/normalises-refs-like-riskregister' => static function (): void {
+                $c = self::capRefs('CISv7: 4,CISv7:4,junk,CISv7:,:19,CISv7:19');
+                sac_assert_eq($c['refs'], 'CISv7:4,CISv7:19', 'trimmed around each part, malformed entries dropped, duplicates collapsed');
+                sac_assert_eq($c['sent'], 2, 'the count describes the normalised string, not the raw input');
+                sac_assert_eq($c['malformed'], 3, 'junk, an empty code and an empty framework are each malformed');
+                sac_assert_eq($c['dropped'], 0, 'malformed is not dropped: dropped means a valid ref that did not fit');
+
+                // Split on the FIRST colon only — a ref_code may contain one.
+                $colon = self::capRefs('CISv7:4:a , CISv7:4:a');
+                sac_assert_eq($colon['refs'], 'CISv7:4:a', 'a code containing a colon survives whole and still dedupes');
+                sac_assert_eq($colon['sent'], 1, 'one distinct ref');
+
+                // Dedup must run on the NORMALISED form, or these stay two.
+                $equiv = self::capRefs('CISv7: 4, CISv7:4 ');
+                sac_assert_eq($equiv['sent'], 1, 'CISv7: 4 and CISv7:4 are the same ref to riskregister, so they must be one to us');
             },
 
             'db/affected-absent-riskregister-is-safe' => static function (): void {

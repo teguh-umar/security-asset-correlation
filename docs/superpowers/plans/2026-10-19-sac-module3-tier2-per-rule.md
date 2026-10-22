@@ -48,6 +48,15 @@ agreement; where this plan and they disagree, they win.
   with a bare `continue` that `refs_unmatched` never counts, and a cut landing
   inside a code (`CISv7:19` -> `CISv7:1`) still parses as a valid pair pointing at
   the WRONG control. Pinned by `affected/caps-framework-refs-at-255`.
+- **Refs are normalised exactly as `RefList::parse()` does, in this order:**
+  trim around the pair and around each part (`CISv7: 4` is `CISv7:4`) -> drop a
+  malformed entry (no colon, empty framework, or empty code) -> dedup **on the
+  normalised form** -> cap -> count. Any other order breaks the count: SAC would
+  claim refs riskregister does not parse, and 2.2.0 would refuse the row with a
+  symptom that looks like truncation. Malformed refs are reported separately via
+  `Reconcile::note('refs_malformed')`, because they mean SAC's own host wrapper
+  emitted junk and they never reach riskregister to be noticed there. Pinned by
+  `affected/normalises-refs-like-riskregister`.
 - **Refs are deduplicated before the cap.** riskregister's `RefList::parse()`
   discards a repeated `framework:code` pair, so a duplicate adds nothing but can
   still spend the 255 and evict a DISTINCT ref. Pinned by
