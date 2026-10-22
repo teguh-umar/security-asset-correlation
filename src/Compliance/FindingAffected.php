@@ -60,23 +60,44 @@ final class FindingAffected
      * SSG lists them in benchmark order, and an arbitrary subset is more
      * useful than a corrupt one. Never cuts inside a ref.
      *
-     * @return array{refs: string, dropped: int}
+     * Duplicates are removed first and are NOT counted as dropped: they were
+     * never going to reach riskregister, whose RefList::parse() discards a
+     * repeated framework:code pair. `dropped` means "a distinct ref the
+     * content supplied that did not fit".
+     *
+     * @return array{refs: string, dropped: int, sent: int}
      */
     public static function capRefs(string $refs): array
     {
         $refs = trim($refs);
-        if ($refs === '' || strlen($refs) <= self::REFS_MAX) {
-            return ['refs' => $refs, 'dropped' => 0];
+        if ($refs === '') {
+            return ['refs' => '', 'dropped' => 0, 'sent' => 0];
         }
 
+        // No "it already fits" shortcut: dedup and whitespace normalisation
+        // have to happen to every list, not only the oversized ones, or a
+        // short list keeps duplicates that make `sent` disagree with
+        // riskregister's parsed count.
         $kept    = [];
         $dropped = 0;
         $len     = 0;
+        $seen    = [];
         foreach (explode(',', $refs) as $ref) {
             $ref = trim($ref);
             if ($ref === '') {
                 continue;
             }
+            // Deduplicate on the way in. riskregister's RefList::parse()
+            // discards a repeated framework:code pair anyway, so a duplicate
+            // buys nothing and spends the scarce 255 — it can push a DISTINCT
+            // ref out of the list. It also keeps "how many refs did SAC send"
+            // answerable: once riskregister 2.2.0 asks for a per-row count,
+            // kept-count and their parsed count have to agree, and they only
+            // do if both sides dedupe.
+            if (isset($seen[$ref])) {
+                continue;
+            }
+            $seen[$ref] = true;
             // +1 for the comma this ref would need, except for the first.
             $need = strlen($ref) + ($kept === [] ? 0 : 1);
             if ($len + $need > self::REFS_MAX) {
@@ -87,7 +108,13 @@ final class FindingAffected
             $len   += $need;
         }
 
-        return ['refs' => implode(',', $kept), 'dropped' => $dropped];
+        return [
+            'refs'    => implode(',', $kept),
+            'dropped' => $dropped,
+            // What riskregister 2.2.0 will compare against its own parse of
+            // the string: the number of refs actually in what we send.
+            'sent'    => count($kept),
+        ];
     }
 
     /**
@@ -128,6 +155,14 @@ final class FindingAffected
             $refsDropped += $capped['dropped'];
             if ($capped['refs'] !== '') {
                 $row['framework_refs'] = $capped['refs'];
+                // riskregister 2.2.0 will refuse a row whose parsed ref count
+                // disagrees with this, which is how a truncated ref gets
+                // caught — a cut ref cannot be recognised from itself.
+                // riskregister 2.1.0 builds its input from an allow-list
+                // (`Finding_Item::upsertRows()`), so today this key is simply
+                // ignored: sending it now is preparation, not behaviour.
+                // Omitted together with the refs, never sent as a bare 0.
+                $row['framework_refs_sent'] = (string) $capped['sent'];
             }
             $rows[] = $row;
         }
@@ -267,6 +302,86 @@ final class FindingAffected
                 ], $none);
                 sac_assert_eq($short[0]['framework_refs'], 'CISv7:4,CISv7:19', 'a list within the limit is never reshaped');
                 sac_assert_eq($none, 0, 'nothing dropped when nothing overflows');
+            },
+
+            // riskregister's RefList::parse() discards a repeated
+            // framework:code pair. Sending duplicates therefore cannot add
+            // information, but it CAN spend the 255 budget and push a
+            // distinct ref out — turning a harmless repeat in the content
+            // into real data loss.
+            'affected/deduplicates-refs-before-capping' => static function (): void {
+                $rows = self::rowsFor([
+                    ['rule_id' => 'r', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:4,CISv7:4,CISv7:19', 'state' => 'open'],
+                ], $dropped);
+                sac_assert_eq($rows[0]['framework_refs'], 'CISv7:4,CISv7:19', 'a repeated ref is sent once, in first-seen order');
+                sac_assert_eq($dropped, 0, 'a duplicate is not a drop: it was never going to reach riskregister anyway');
+
+                // The point of doing it BEFORE the cap: duplicates must not
+                // be able to evict a distinct ref. 35 copies of CISv7:1 is
+                // 280 bytes undeduped, so without this the trailing distinct
+                // ref would be pushed out by refs that carry no information.
+                $withDupes = str_repeat('CISv7:1,', 35) . 'CISv7:999';
+                sac_assert(strlen($withDupes) > 255, 'fixture must overflow BEFORE dedup, or it proves nothing');
+
+                $capped = self::capRefs($withDupes);
+                sac_assert_eq($capped['refs'], 'CISv7:1,CISv7:999', 'duplicates collapse to one, so the distinct ref still fits');
+                sac_assert_eq($capped['dropped'], 0, 'nothing distinct was lost, so nothing is reported as dropped');
+                sac_assert_eq($capped['sent'], 2, 'sent counts what riskregister will parse: two distinct refs');
+            },
+
+            // riskregister 2.2.0 refuses a row whose parsed ref count
+            // disagrees with `framework_refs_sent` — that is how a ref
+            // truncated in transit gets caught, since a cut ref cannot be
+            // recognised from itself. So the number must match THEIR parse of
+            // the exact string we send, not our idea of what we sent.
+            // The local parse below mirrors riskregister's RefList::parse():
+            // split on commas, require a non-empty side either side of the
+            // first colon, and discard a repeated pair.
+            'affected/refs-sent-count-matches-the-string' => static function (): void {
+                $parseLikeRiskregister = static function (string $raw): int {
+                    $seen = [];
+                    foreach (explode(',', $raw) as $chunk) {
+                        $chunk = trim($chunk);
+                        if ($chunk === '' || !str_contains($chunk, ':')) {
+                            continue;
+                        }
+                        [$fw, $code] = explode(':', $chunk, 2);
+                        if (trim($fw) === '' || trim($code) === '') {
+                            continue;
+                        }
+                        $seen[trim($fw) . ':' . trim($code)] = true;
+                    }
+                    return count($seen);
+                };
+
+                $cases = [
+                    'plain'      => 'CISv7:4,CISv7:19',
+                    'duplicates' => 'CISv7:4,CISv7:4,CISv7:19',
+                    'untidy'     => ' CISv7:4 , , CISv7:19 ',
+                    'overflowing' => implode(',', array_map(
+                        static fn(int $i): string => 'CISv7:' . $i,
+                        range(1, 40)
+                    )),
+                ];
+
+                foreach ($cases as $name => $raw) {
+                    $rows = self::rowsFor([
+                        ['rule_id' => 'r', 'severity' => 'low', 'title' => 't', 'framework_refs' => $raw, 'state' => 'open'],
+                    ]);
+                    $sent = $rows[0]['framework_refs'];
+                    sac_assert_eq(
+                        (int) $rows[0]['framework_refs_sent'],
+                        $parseLikeRiskregister($sent),
+                        "framework_refs_sent must equal riskregister's parse of the string sent [$name]"
+                    );
+                }
+
+                // A rule with no refs sends neither key: a bare 0 would be a
+                // claim about a string that is not there.
+                $none = self::rowsFor([
+                    ['rule_id' => 'r0', 'severity' => 'low', 'title' => 't', 'framework_refs' => '', 'state' => 'open'],
+                ]);
+                sac_assert(!array_key_exists('framework_refs_sent', $none[0]), 'no refs sent = no count sent');
             },
 
             'db/affected-absent-riskregister-is-safe' => static function (): void {

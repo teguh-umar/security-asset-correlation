@@ -48,6 +48,18 @@ agreement; where this plan and they disagree, they win.
   with a bare `continue` that `refs_unmatched` never counts, and a cut landing
   inside a code (`CISv7:19` -> `CISv7:1`) still parses as a valid pair pointing at
   the WRONG control. Pinned by `affected/caps-framework-refs-at-255`.
+- **Refs are deduplicated before the cap.** riskregister's `RefList::parse()`
+  discards a repeated `framework:code` pair, so a duplicate adds nothing but can
+  still spend the 255 and evict a DISTINCT ref. Pinned by
+  `affected/deduplicates-refs-before-capping`.
+- **Each row with refs also carries `framework_refs_sent`** (riskregister session,
+  2026-10-22): the count of refs in that row's string **after** the cap, per row,
+  never batch-level. riskregister 2.2.0 refuses a row whose parsed count disagrees,
+  which is how a ref truncated in transit is caught — a cut ref cannot be
+  recognised from itself. 2.1.0 builds its input from an allow-list
+  (`Finding_Item::upsertRows()`), so the key is ignored until then: sending it in
+  1.8.0 is preparation, not behaviour. Omitted together with the refs, never sent
+  as a bare 0. Pinned by `affected/refs-sent-count-matches-the-string`.
 - **Omitting a field is not the same as sending it empty** (riskregister contract
   change, hub §7 2026-10-19). An omitted key leaves the stored value alone; `''`
   erases it. SAC therefore never sends `description` (a human's remediation note
