@@ -231,7 +231,22 @@ final class ConfigScan
             // Open AND resolved rules: a fixed item should show as Resolved
             // on the Finding, not vanish from it. No-op until riskregister
             // 2.1.0 is installed (FindingAffected guards on method_exists).
-            FindingAffected::push($findingId, RuleStore::allFor($cid));
+            $pushed = FindingAffected::push($findingId, RuleStore::allFor($cid));
+
+            // riskregister's framework_refs column is varchar(255); refs past
+            // it are dropped whole rather than cut mid-ref. Recorded against
+            // the host so it shows in Reconcile, because the content DID
+            // supply those refs and nothing else would ever say they are gone.
+            if (!empty($pushed['refs_dropped'])) {
+                Reconcile::note(
+                    'config',
+                    'Computer',
+                    $cid,
+                    0,
+                    'refs_truncated',
+                    sprintf('%d framework ref(s) dropped to fit 255 chars', (int) $pushed['refs_dropped'])
+                );
+            }
         }
     }
 

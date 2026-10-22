@@ -27,11 +27,67 @@ final class FindingAffected
 
     private const STATE_MAP = ['open' => 'Open', 'resolved' => 'Resolved'];
 
+    /**
+     * Hard ceiling on `framework_refs`, which riskregister stores as
+     * `varchar(255)` (its Migration.php line 174, confirmed against the VM
+     * by the riskregister session 2026-10-22).
+     *
+     * Overflowing it is not a tidy truncation. MySQL cuts mid-ref, and
+     * riskregister's `RefList::parse()` then drops the malformed tail with a
+     * bare `continue` that `refs_unmatched` never counts, so the loss is
+     * invisible on both sides. Worse, a cut can land INSIDE a code and leave
+     * something that still parses: `CISv7:19` cut to `CISv7:1` is a valid
+     * pair pointing at the wrong control. Silent loss is bad; a silent wrong
+     * answer is the thing this plugin exists to prevent.
+     *
+     * Measured in bytes via strlen(): the column counts characters, so for
+     * the ASCII that ref codes are made of the two agree, and bytes are the
+     * stricter of the two if a non-ASCII code ever appears.
+     */
+    private const REFS_MAX = 255;
+
     public static function isAvailable(): bool
     {
         return \Plugin::isPluginActive('riskregister')
             && class_exists(\GlpiPlugin\Riskregister\Finding_Item::class)
             && method_exists(\GlpiPlugin\Riskregister\Finding_Item::class, 'upsertAffected');
+    }
+
+    /**
+     * PURE. Trims a ref list to {@see REFS_MAX} bytes on whole refs only.
+     *
+     * Drops from the END, so the refs the content listed first survive —
+     * SSG lists them in benchmark order, and an arbitrary subset is more
+     * useful than a corrupt one. Never cuts inside a ref.
+     *
+     * @return array{refs: string, dropped: int}
+     */
+    public static function capRefs(string $refs): array
+    {
+        $refs = trim($refs);
+        if ($refs === '' || strlen($refs) <= self::REFS_MAX) {
+            return ['refs' => $refs, 'dropped' => 0];
+        }
+
+        $kept    = [];
+        $dropped = 0;
+        $len     = 0;
+        foreach (explode(',', $refs) as $ref) {
+            $ref = trim($ref);
+            if ($ref === '') {
+                continue;
+            }
+            // +1 for the comma this ref would need, except for the first.
+            $need = strlen($ref) + ($kept === [] ? 0 : 1);
+            if ($len + $need > self::REFS_MAX) {
+                $dropped++;      // keep counting: the caller reports the total
+                continue;
+            }
+            $kept[] = $ref;
+            $len   += $need;
+        }
+
+        return ['refs' => implode(',', $kept), 'dropped' => $dropped];
     }
 
     /**
@@ -49,10 +105,15 @@ final class FindingAffected
      *    run would mass-erase.
      *
      * @param array<int,array<string,mixed>> $rules
+     * @param int|null $refsDropped out: refs dropped for length across the
+     *                 whole batch. An out-param rather than a changed return
+     *                 type, so the many existing callers and checks that only
+     *                 want the rows keep working unchanged.
      * @return array<int,array<string,string>>
      */
-    public static function rowsFor(array $rules): array
+    public static function rowsFor(array $rules, ?int &$refsDropped = null): array
     {
+        $refsDropped = 0;
         $rows = [];
         foreach ($rules as $r) {
             $row = [
@@ -63,9 +124,10 @@ final class FindingAffected
             ];
             // Verbatim, per the contract: a shape mismatch must surface in
             // riskregister's refs_unmatched, not be smoothed over here.
-            $refs = trim((string) ($r['framework_refs'] ?? ''));
-            if ($refs !== '') {
-                $row['framework_refs'] = $refs;
+            $capped = self::capRefs((string) ($r['framework_refs'] ?? ''));
+            $refsDropped += $capped['dropped'];
+            if ($capped['refs'] !== '') {
+                $row['framework_refs'] = $capped['refs'];
             }
             $rows[] = $row;
         }
@@ -82,7 +144,14 @@ final class FindingAffected
             return null;
         }
 
-        $result = \GlpiPlugin\Riskregister\Finding_Item::upsertAffected($findingId, self::rowsFor($rules));
+        $rows    = self::rowsFor($rules, $refsDropped);
+        $result  = \GlpiPlugin\Riskregister\Finding_Item::upsertAffected($findingId, $rows);
+
+        // Surfaced to the caller, which knows the Computer this scan was for
+        // and can record it against that host. Returned rather than logged
+        // only, because a ref lost to the column width is data the content
+        // did supply, and nobody would ever go looking for it in a log.
+        $result['refs_dropped'] = (int) $refsDropped;
 
         if (!empty($result['refs_unmatched'])) {
             // Not an error on either side: it means SAC's reference codes
@@ -156,6 +225,48 @@ final class FindingAffected
                 sac_assert_eq($rows[0]['framework_refs'], 'CISv7:19', 'code 19 has no v8 equivalent and is still sent verbatim, never dropped or clamped');
                 sac_assert_eq($rows[1]['framework_refs'], 'CISv7:20', 'code 20 likewise: out of v8 range is not a reason to rewrite it');
                 sac_assert_eq($rows[2]['framework_refs'], 'CISv7:4,CISv7:20', 'a multi-ref list keeps both codes and their order');
+            },
+
+            // riskregister stores framework_refs as varchar(255) until its
+            // 2.2.0 moves refs to a child table (its session, 2026-10-22).
+            // A row that overflows is cut MID-REF by MySQL, and RefList::parse()
+            // then drops the malformed tail without counting it in
+            // refs_unmatched — so neither side can see the loss. Build the
+            // list to fit instead, dropping whole refs and reporting how many.
+            'affected/caps-framework-refs-at-255' => static function (): void {
+                // 40 refs of 8-9 chars each is ~340 chars: a realistic rule in
+                // v8 content, which cites several safeguards per rule.
+                $many = implode(',', array_map(
+                    static fn(int $i): string => 'CISv7:' . $i,
+                    range(1, 40)
+                ));
+                sac_assert(strlen($many) > 255, 'fixture must actually overflow, or this check proves nothing');
+
+                $rows = self::rowsFor([
+                    ['rule_id' => 'r', 'severity' => 'low', 'title' => 't', 'framework_refs' => $many, 'state' => 'open'],
+                ], $dropped);
+
+                $sent = $rows[0]['framework_refs'];
+                sac_assert(strlen($sent) <= 255, 'what SAC sends must fit the column: got ' . strlen($sent));
+                sac_assert($dropped > 0, 'the refs that did not fit are counted, not silently gone');
+
+                // The real failure this guards: a cut inside a ref. Every
+                // piece that arrives must still be a whole framework:code.
+                foreach (explode(',', $sent) as $ref) {
+                    sac_assert((bool) preg_match('/^CISv7:\d+$/', $ref), 'every surviving ref is whole, never cut mid-ref: got ' . $ref);
+                }
+
+                // CISv7:19 cut to CISv7:1 would still parse — and point at the
+                // wrong control. Pin that no such mutation reached the output.
+                $kept = explode(',', $sent);
+                sac_assert(count($kept) + $dropped === 40, 'kept + dropped accounts for every ref the content supplied');
+
+                // A list that already fits is passed through untouched.
+                $short = self::rowsFor([
+                    ['rule_id' => 'r2', 'severity' => 'low', 'title' => 't', 'framework_refs' => 'CISv7:4,CISv7:19', 'state' => 'open'],
+                ], $none);
+                sac_assert_eq($short[0]['framework_refs'], 'CISv7:4,CISv7:19', 'a list within the limit is never reshaped');
+                sac_assert_eq($none, 0, 'nothing dropped when nothing overflows');
             },
 
             'db/affected-absent-riskregister-is-safe' => static function (): void {

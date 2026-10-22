@@ -36,9 +36,18 @@ agreement; where this plan and they disagree, they win.
 - **Absence never means fixed.** A host that is unreachable, or whose oscap cron did
   not run, yields an empty rule list. Only a scan that actually produced a summary
   line may resolve anything.
-- **Framework refs pass through verbatim.** Send `CISv8:4.1` exactly as the content
+- **Framework refs pass through verbatim.** Send `CISv7:19` exactly as the content
   states it, normalised only to `shortname:code`. Never map or re-interpret — a
   mismatch must surface in riskregister's `refs_unmatched`, not be smoothed over.
+  (The label comes from each ref's own href; see Task 1's answer.)
+- **`framework_refs` must fit 255 bytes** (riskregister session, 2026-10-22: the
+  column is `varchar(255)` until their 2.2.0 moves refs to a child table). SAC
+  builds the list to fit, dropping WHOLE refs from the end and recording the count
+  through `Reconcile::note('refs_truncated')`. Letting MySQL do the cutting is not
+  an option: it cuts mid-ref, `RefList::parse()` then drops the malformed tail
+  with a bare `continue` that `refs_unmatched` never counts, and a cut landing
+  inside a code (`CISv7:19` -> `CISv7:1`) still parses as a valid pair pointing at
+  the WRONG control. Pinned by `affected/caps-framework-refs-at-255`.
 - **Omitting a field is not the same as sending it empty** (riskregister contract
   change, hub §7 2026-10-19). An omitted key leaves the stored value alone; `''`
   erases it. SAC therefore never sends `description` (a human's remediation note
