@@ -36,6 +36,22 @@ final class SummaryPayload
                 sac_assert($out['summary'] === null, 'no summary line = unusable payload');
                 sac_assert_eq($out['rules'], [], 'rules are discarded with it, never applied on their own');
             },
+            'payload/keeps-content-notes' => static function (): void {
+                $raw = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700
+"
+                     . "SACRULE1|rule_a|fail|high||A
+"
+                     . "SACNOTE1|unknown_cis_href|https://www.cisecurity.org/controls/v8/|7
+";
+                $out = self::split($raw);
+                sac_assert_eq(count($out['rules']), 1, 'the note is not mistaken for a rule');
+                sac_assert_eq(count($out['notes']), 1, 'the note survives: a host on newer CIS content must be able to say so');
+            },
+            'payload/notes-die-with-an-unusable-payload' => static function (): void {
+                $out = self::split("SACNOTE1|unknown_cis_href|x|1
+");
+                sac_assert_eq($out['notes'], [], 'no summary = nothing from that pull is trusted, notes included');
+            },
             'payload/ignores-blank-and-foreign-lines' => static function (): void {
                 $raw = "\nSACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n\nsome banner text\nSACRULE1|rule_a|fail|high||A\n";
                 $out = self::split($raw);
@@ -48,12 +64,13 @@ final class SummaryPayload
     /**
      * PURE.
      *
-     * @return array{summary:?string,rules:array<int,string>}
+     * @return array{summary:?string,rules:array<int,string>,notes:array<int,string>}
      */
     public static function split(string $raw): array
     {
         $summary = null;
         $rules   = [];
+        $notes   = [];
 
         foreach (preg_split('/\R/', $raw) ?: [] as $line) {
             $line = trim($line);
@@ -71,11 +88,20 @@ final class SummaryPayload
             }
             if (str_starts_with($line, 'SACRULE1|')) {
                 $rules[] = $line;
+                continue;
+            }
+            // SACNOTE1 is the wrapper telling us something about the CONTENT
+            // rather than about a rule — today, a CIS reference href SAC does
+            // not recognise. Kept rather than treated as noise: it is the
+            // only way a host whose SSG moved to a newer CIS edition can
+            // announce itself, instead of its refs quietly going missing.
+            if (str_starts_with($line, 'SACNOTE1|')) {
+                $notes[] = $line;
             }
         }
 
         return $summary === null
-            ? ['summary' => null, 'rules' => []]
-            : ['summary' => $summary, 'rules' => $rules];
+            ? ['summary' => null, 'rules' => [], 'notes' => []]
+            : ['summary' => $summary, 'rules' => $rules, 'notes' => $notes];
     }
 }

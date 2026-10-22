@@ -157,6 +157,25 @@ final class ConfigScan
         }
         RuleStore::sync($cid, $rules, $parsed['date_scan']);
 
+        // Surfaced per host, because it IS per host: one server's SSG can
+        // move to a newer CIS edition while the rest of the fleet stays put.
+        // Without this the only symptom would be refs quietly disappearing
+        // from that host's findings.
+        foreach ($payload['notes'] as $noteLine) {
+            $parts = explode('|', $noteLine, 4);
+            if (count($parts) < 3 || $parts[1] !== 'unknown_cis_href') {
+                continue;
+            }
+            Reconcile::note(
+                'config',
+                'Computer',
+                $cid,
+                0,
+                'unknown_cis_href',
+                sprintf('%s (%s reference(s)) — recon this host and add it to CIS_HREFS', $parts[2], $parts[3] ?? '?')
+            );
+        }
+
         $code = Code::configScore($cid);
         $sev  = Severity::forConfigScore($parsed['score'], $critical, $high, $medium);
 
