@@ -431,7 +431,7 @@ final class ConfigScan
                 $catId = FindingWriter::categoryId('Configuration Compliance', 0);
                 try {
                     $payload = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n"
-                             . "SACRULE1|rule_a|fail|high|CISv8:4.1|Disable root login\n"
+                             . "SACRULE1|rule_a|fail|high|CISv7:4|Disable root login\n"
                              . "SACRULE1|rule_b|fail|low||Set umask\n";
                     $run = RunLog::begin('selftest');
                     self::processTarget($target, $payload, $catId, null, $run);

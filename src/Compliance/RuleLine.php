@@ -19,12 +19,12 @@ final class RuleLine
     {
         return [
             'ruleline/parses-well-formed' => static function (): void {
-                $r = self::parse('SACRULE1|xccdf_org.ssgproject.content_rule_sshd_disable_root_login|fail|high|CISv8:4.1,CISv8:5.4|Disable SSH root login');
+                $r = self::parse('SACRULE1|xccdf_org.ssgproject.content_rule_sshd_disable_root_login|fail|high|CISv7:4,CISv7:5|Disable SSH root login');
                 sac_assert($r !== null, 'well-formed line parses');
                 sac_assert_eq($r['rule_id'], 'xccdf_org.ssgproject.content_rule_sshd_disable_root_login', 'rule_id');
                 sac_assert_eq($r['result'], 'fail', 'result');
                 sac_assert_eq($r['severity'], 'high', 'severity');
-                sac_assert_eq($r['framework_refs'], 'CISv8:4.1,CISv8:5.4', 'framework refs kept verbatim');
+                sac_assert_eq($r['framework_refs'], 'CISv7:4,CISv7:5', 'framework refs kept verbatim');
                 sac_assert_eq($r['title'], 'Disable SSH root login', 'title');
             },
             'ruleline/title-may-contain-pipes' => static function (): void {
