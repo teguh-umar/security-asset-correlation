@@ -119,7 +119,43 @@ grep -o 'href="[^"]*"' /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml \
   | sort | uniq -c | sort -rn | head -20
 ```
 
-- [ ] **Step 3:** Record the answer here, in this task, before starting Task 10:
+- [x] **ANSWER — recon run on `vm-dev-damara` (Oracle Linux 9), 2026-10-22.**
+
+  The content dir holds two datastreams, `ssg-firefox-ds.xml` and
+  `ssg-ol9-ds.xml` (16 MB, dated Sep 2023). The wrapper's product-exclusion
+  list correctly selects the ol9 one, so the hardcoded `ssg-ol9-ds.xml` in the
+  commands above happens to be right on THIS host — but auto-detect is what
+  actually decides, and a host with different content would diverge.
+
+  - **Element shape:** `<xccdf-1.2:reference href="...">CODE</xccdf-1.2:reference>`
+  - **Namespace URI:** `http://checklists.nist.gov/xccdf/1.2` (prefix `xccdf-1.2:`).
+    Task 10's `ns` map already uses this URI, so it needs no change — ElementTree
+    resolves by URI, not by prefix.
+  - **`CIS_HREF` = `cisecurity.org/controls/`** (full value
+    `https://www.cisecurity.org/controls/`), 3654 occurrences.
+  - **Code format: bare integers. No dotted sub-controls anywhere.** The full set
+    of distinct codes present is `1 2 3 4 5 6 7 8 9 11 12 13 14 15 16 18 19 20`
+    (10 and 17 are absent — no rule references them). The project note about CIS
+    sub-control refs truncating to a parent number (`5.2` -> `5`) therefore does
+    NOT apply to this content: nothing needs truncating.
+  - **PCI DSS references are excluded for free.** They appear as
+    `<xccdf-1.2:reference>https://www.pcisecuritystandards.org/...</...>` with
+    **no `href` attribute at all**, so selecting on the href substring drops them.
+    (Beware a naive text search for `cisecurity`: it also matches
+    `p-cisecurity-standards`.)
+
+  - ⚠️ **BLOCKING FINDING — this content references CIS Controls v7, not v8.**
+    The codes run to 20; CIS v8 has only 18 controls, v7 has 20. Emitting these
+    as `CISv8:<n>`, as Task 10 Step 2 currently does, mislabels them. riskregister's
+    `cis_v8.csv` holds controls 1-18, so `19`/`20` would match nothing, and 1-18
+    would match the WRONG control, because v8 reorganised v7 rather than trimming
+    it. A silently wrong control reference is worse than none.
+    **Task 10 must not use the `CISv8:` prefix until this is resolved.** Options:
+    emit `CISv7:<n>` and let riskregister decide whether it can map v7, or emit a
+    neutral `CIS:<n>`, or send nothing. Needs the riskregister session's input,
+    since it owns the framework tables.
+
+- [ ] **Step 3 (original instruction):** Record the answer here, in this task, before starting Task 10:
   the href substring that identifies CIS, and the exact code format (`4.1` vs
   `CIS-4.1` vs `4`). If the content carries **no** CIS references (plausible — this
   is the `standard` profile on Oracle Linux, which has no CIS profile at all), say
