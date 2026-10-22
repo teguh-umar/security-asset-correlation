@@ -144,7 +144,28 @@ grep -o 'href="[^"]*"' /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml \
     (Beware a naive text search for `cisecurity`: it also matches
     `p-cisecurity-standards`.)
 
-  - ⚠️ **BLOCKING FINDING — this content references CIS Controls v7, not v8.**
+  - **RESOLVED by the orchestrator's ruling, hub §7 2026-10-22: send `CISv7:<n>`,
+    exactly as the content states.** riskregister's 2.1.0 contract keeps an
+    unmatched ref as stored text, counts it in `refs_unmatched`, and never
+    invents or guesses a control (verified in its
+    `Finding_Item::linkFrameworkRefs()`: an unknown framework shortname
+    increments `unmatched` and skips). It has no `CISv7` framework today, so
+    every ref lands as text and nothing is mislinked - strictly better than
+    omitting refs, which would throw away data a later v7->v8 mapping needs.
+    Do NOT send `CISv8`, and do NOT send a neutral `CIS:`.
+    Pinned by `affected/passes-cisv7-codes-through-untouched`.
+
+  - ⚠️ **FLEET CAVEAT (user, 2026-10-22): other hosts may be on v8 content.**
+    This recon covers ONE host. A newer SSG, or a different OS, can reference
+    CIS v8 (dotted safeguards like `4.1`), and one datastream can even carry
+    several CIS reference sets. **Task 10 therefore labels each `<reference>`
+    from its own href, never with a per-host prefix**, keeps a table of only
+    recon-confirmed hrefs, and reports an unrecognised CIS href via
+    `Reconcile::note()` instead of guessing. Re-run this recon on the first
+    non-OL9 host added to the fleet, and add its href to the table before
+    expecting refs from it.
+
+  - **Original finding (kept for the record) — this content references CIS Controls v7, not v8.**
     The codes run to 20; CIS v8 has only 18 controls, v7 has 20. Emitting these
     as `CISv8:<n>`, as Task 10 Step 2 currently does, mislabels them. riskregister's
     `cis_v8.csv` holds controls 1-18, so `19`/`20` would match nothing, and 1-18
@@ -1070,7 +1091,36 @@ for rr in test_result.findall('xccdf:rule-result', ns):
 
 ```python
 import re
-CIS_HREF = 'cisecurity.org'   # ← confirm/replace from Task 1 Step 3
+# Each <reference> is labelled from ITS OWN href, never from one per-host
+# prefix. Two reasons, both real: the fleet can mix SSG versions (one host on
+# v7 content, another on v8), and a single datastream can carry more than one
+# CIS reference set side by side. A global prefix would mislabel whichever
+# side it guessed wrong.
+#
+# Only entries CONFIRMED by recon on a real host belong in this table. An
+# unrecognised CIS href is skipped and reported, never labelled on a hunch:
+# a wrong control reference is worse than a missing one.
+CIS_HREFS = {
+    # href substring            -> riskregister framework shortname
+    'cisecurity.org/controls/': 'CISv7',
+    #   ^ confirmed on vm-dev-damara, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
+    #     bare integer codes, observed set 1-9,11-16,18-20. Codes reaching 20
+    #     is what identifies v7 (v8 has 18 controls).
+    # Add a v8 entry ONLY after running the Task 1 recon on a host that has it.
+}
+
+# Corroborating shape check. v7 cites whole controls ("19"); v8 cites dotted
+# safeguards ("4.1"). If a code's shape contradicts the label its href earned,
+# the table is out of date for that host - skip and report rather than emit a
+# confident wrong answer.
+def label_for(href, code):
+    for frag, short in CIS_HREFS.items():
+        if frag not in href:
+            continue
+        if short == 'CISv7' and '.' in code:
+            return None   # dotted code under the v7 href: content changed
+        return short
+    return None
 titles, refs = {}, {}
 content = ET.parse(content_path).getroot()
 for rule in content.iter():
@@ -1082,14 +1132,39 @@ for rule in content.iter():
     t = rule.find('xccdf:title', ns)
     if t is not None and t.text:
         titles[rid] = ' '.join(t.text.split())
-    codes = [
-        (r.text or '').strip()
-        for r in rule.findall('xccdf:reference', ns)
-        if CIS_HREF in (r.get('href') or '')
-    ]
-    if codes:
-        refs[rid] = ','.join('CISv8:' + c for c in codes if c)
+    labelled = []
+    for r in rule.findall('xccdf:reference', ns):
+        href = r.get('href') or ''
+        code = (r.text or '').strip()
+        if not code:
+            continue
+        # PCI DSS refs in this content carry NO href at all, so they fall out
+        # here without needing their own exclusion.
+        short = label_for(href, code)
+        if short is None:
+            if 'cisecurity.org' in href:
+                unknown_cis_hrefs[href] = unknown_cis_hrefs.get(href, 0) + 1
+            continue
+        labelled.append(short + ':' + code)
+    if labelled:
+        refs[rid] = ','.join(labelled)
 ```
+
+- [ ] **Step 2b:** Report any CIS href the table does not know, instead of
+  dropping it silently. Initialise `unknown_cis_hrefs = {}` before the loop and
+  emit one line per unknown href after the rule lines:
+
+```python
+for href, n in sorted(unknown_cis_hrefs.items()):
+    print("SACNOTE1|unknown_cis_href|{}|{}".format(href, n))
+```
+
+  The PHP side records these through `Reconcile::note()`, the same path
+  `bad_summary` already uses, so an SSG version bump on any host surfaces in the
+  Reconcile tab as "this host has CIS references SAC does not recognise" rather
+  than as refs that quietly stop appearing. **This is what makes a mixed v7/v8
+  fleet safe:** a host whose content moved to v8 reports itself instead of being
+  mislabelled as v7.
 
 - [ ] **Step 3:** Emit one line per rule after the summary line:
 
