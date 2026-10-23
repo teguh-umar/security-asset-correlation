@@ -71,6 +71,21 @@ if [ -z "$CONTENT_FILE" ] || [ ! -f "$CONTENT_FILE" ]; then
 fi
 log "Using content: $CONTENT_FILE"
 
+# The product-exclusion list above can tell OS content from browser content,
+# but not one OS VERSION from another: on an OL9 host carrying only
+# ssg-ol7-ds.xml it picks the ol7 file and oscap then reports every rule as
+# notapplicable. Observed on vm-hq-glpi, 2026-10-22: 978 rules, 0 pass,
+# 0 fail, score 0.00. Warn loudly; the hard stop is the pass+fail check below,
+# which catches the same thing without having to know OS naming conventions.
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    OS_TAG="${ID:-}${VERSION_ID%%.*}"
+    case "$(basename "$CONTENT_FILE")" in
+        *"$OS_TAG"*) : ;;
+        *) log "WARNING: content $(basename "$CONTENT_FILE") does not look like it matches this host ($OS_TAG). Rules may all come back notapplicable. Install the matching scap-security-guide content, or set SAC_CONTENT_FILE." ;;
+    esac
+fi
+
 if [ -z "$PROFILE_ID" ]; then
     # Extract any profile id substring anywhere in `oscap info`'s output,
     # instead of anchoring on an exact "Id: " line format — that anchor
@@ -183,6 +198,24 @@ if [ -z "$LINE" ]; then
     exit 1
 fi
 log "Summary line: $LINE"
+
+# A scan where NOTHING was evaluated is not a score of zero, it is a failed
+# scan. Writing it would hand SAC a 0.00 that its thresholds read as Critical,
+# and a host would be reported as maximally non-compliant because its content
+# did not match. Refusing to write leaves the previous file in place, so the
+# host ages into SAC's "stale" handling instead — which says "this host has
+# not reported", which is the truth.
+# A genuinely clean host has fail=0 but pass>0, so it is unaffected.
+PASS_N=$(printf '%s' "$LINE" | cut -d'|' -f4)
+FAIL_N=$(printf '%s' "$LINE" | cut -d'|' -f5)
+if [ "$((PASS_N + FAIL_N))" -eq 0 ]; then
+    log "REFUSING to write: the scan evaluated nothing (pass=0, fail=0, other=$(printf '%s' "$LINE" | cut -d'|' -f6))."
+    log "This is a broken scan, not a score of 0. Almost always the content does not match the OS:"
+    log "  host content : $CONTENT_FILE"
+    log "  host OS      : ${PRETTY_NAME:-unknown}"
+    log "Install the matching scap-security-guide, or set SAC_CONTENT_FILE. $OUTPUT_FILE is left untouched."
+    exit 1
+fi
 
 # ---- Parse the same results into per-rule SACRULE1 lines ------------------
 # Deliberately a SECOND, separate step rather than folded into the summary
