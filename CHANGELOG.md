@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.8.0-rc1] - 2026-10-25
+
+Module 3 Tier 2: per-rule SCAP results. Tier 1 reported one score per host;
+this release records every failing rule by name, tracks it until it is fixed,
+and sends it to `riskregister` as an affected area of the host's Finding.
+
+### Added
+
+- **Per-rule compliance results.** The host wrapper now emits one line per
+  failing rule alongside the existing score line, and SAC stores each rule
+  with its own open / resolved / reopened lifecycle. A rule that stops
+  failing is marked Resolved rather than disappearing, so "it is no longer
+  listed" can never be mistaken for "it was fixed".
+- **Per-host rule checklist page**, reached from the Config compliance tab.
+- **CIS control references** are passed to `riskregister` as affected-area
+  `framework_refs`, taken verbatim from the SCAP content.
+- **Config compliance scanning defaults to monthly** (`compliance_stale_days`
+  45), matching how often a benchmark realistically changes.
+
+### Changed
+
+- **A scan that evaluated nothing is refused, not reported as 0.00.** An
+  Oracle Linux 9 host carrying only Oracle Linux 7 SCAP content returns every
+  rule as "notapplicable": 978 rules, 0 pass, 0 fail. The previous wrapper
+  wrote that as a score of zero, which SAC's thresholds read as Critical — a
+  host reported as maximally non-compliant because of a packaging mistake.
+  The wrapper now leaves the previous payload untouched and explains why, so
+  the host ages into the existing "stale" handling instead, which says what
+  is actually true: it has not reported. A genuinely clean host has pass > 0
+  and is unaffected.
+- **CIS references are labelled per reference, from its own href**, never
+  with one benchmark version assumed for the whole fleet. The content on
+  Oracle Linux 9 references CIS Controls **v7** (its codes run to 20; v8 has
+  18), so refs are sent as `CISv7:<n>`. A reference whose href SAC does not
+  recognise is reported through the Reconcile tab instead of being guessed
+  at, because a wrong control reference is worse than a missing one.
+- **`framework_refs` is built to fit riskregister's 255-character column.**
+  Refs are normalised exactly as its parser normalises them, deduplicated,
+  then whole refs are dropped from the end if the list is still too long —
+  never cut mid-reference. A cut landing inside a code (`CISv7:19` becoming
+  `CISv7:1`) would still parse, and would point at the wrong control.
+
+### Notes for deployment
+
+- This release changes `.twig` files, so **`cache:clear` is required**.
+- The host wrapper (`tools/host-agent/sac-oscap-summary.sh`) must be
+  redeployed to every monitored host; without it, hosts keep sending the
+  score line alone and SAC behaves exactly as in 1.7.1.
 ## [1.7.1] - 2026-10-15
 
 ### Added (rc4 → rc5)
@@ -775,3 +823,4 @@ checklist.
 - `tools/selfcheck.php` (full VM self-check runner, bootstraps GLPI and runs
   every `GlpiPlugin\Sac\*::selfChecks()` including the `db/` fixtures) and
   `tools/offline-selfcheck.php` (dependency-free pure-logic subset).
+

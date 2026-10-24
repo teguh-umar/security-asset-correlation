@@ -1,6 +1,6 @@
 # SAC 1.8.0 — Module 3 Tier 2 (per-rule SCAP results) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Turn "49.17%, 55 fail" into an actionable list — store each failing SCAP
 rule per host, close it automatically when a later scan shows it fixed, reopen it
@@ -134,14 +134,14 @@ agreement; where this plan and they disagree, they win.
 **Not a code task.** The CIS-reference parsing in Task 10 is written against what
 this returns. Guessing a data shape is exactly what cost this project v1.7.0.
 
-- [ ] **Step 1:** On a monitored host, list the distinct reference shapes:
+- [x] **Step 1:** On a monitored host, list the distinct reference shapes:
 
 ```bash
 grep -o '<reference href="[^"]*"[^>]*>[^<]*</reference>' \
   /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml | sort -u | head -30
 ```
 
-- [ ] **Step 2:** Confirm whether CIS references are present at all, and under which
+- [x] **Step 2:** Confirm whether CIS references are present at all, and under which
   href:
 
 ```bash
@@ -206,7 +206,7 @@ grep -o 'href="[^"]*"' /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml \
     neutral `CIS:<n>`, or send nothing. Needs the riskregister session's input,
     since it owns the framework tables.
 
-- [ ] **Step 3 (original instruction):** Record the answer here, in this task, before starting Task 10:
+- [x] **Step 3 (original instruction):** Record the answer here, in this task, before starting Task 10:
   the href substring that identifies CIS, and the exact code format (`4.1` vs
   `CIS-4.1` vs `4`). If the content carries **no** CIS references (plausible — this
   is the `standard` profile on Oracle Linux, which has no CIS profile at all), say
@@ -228,7 +228,7 @@ SACRULE1|<rule_id>|<result>|<severity>|<framework_refs>|<title>
 `framework_refs` may be empty. `title` is last **on purpose** so a title containing
 `|` cannot shift the other fields.
 
-- [ ] **Step 1: Write the failing test** — new file, with `parse()` stubbed to `return null;`:
+- [x] **Step 1: Write the failing test** — new file, with `parse()` stubbed to `return null;`:
 
 ```php
 <?php
@@ -277,12 +277,12 @@ final class RuleLine
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php ruleline/`
 Expected: FAIL on `ruleline/parses-well-formed` ("well-formed line parses")
 
-- [ ] **Step 3: Implement** — replace the stub:
+- [x] **Step 3: Implement** — replace the stub:
 
 ```php
     private const TAG = 'SACRULE1';
@@ -326,12 +326,12 @@ Expected: FAIL on `ruleline/parses-well-formed` ("well-formed line parses")
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php ruleline/`
 Expected: PASS (all four checks)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/RuleLine.php
@@ -351,7 +351,7 @@ This is where Review Focus #1 is enforced: `summary` is null unless the FIRST
 non-empty line is a summary line, and a caller must treat a null summary as "this
 pull told us nothing", never as "no rules are failing".
 
-- [ ] **Step 1: Write the failing test** — new file, `split()` stubbed to `return ['summary' => null, 'rules' => []];`:
+- [x] **Step 1: Write the failing test** — new file, `split()` stubbed to `return ['summary' => null, 'rules' => []];`:
 
 ```php
 'payload/splits-summary-and-rules' => static function (): void {
@@ -383,12 +383,12 @@ pull told us nothing", never as "no rules are failing".
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php payload/`
 Expected: FAIL on `payload/splits-summary-and-rules`
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
 <?php
@@ -438,12 +438,12 @@ final class SummaryPayload
 
 (plus the `selfChecks()` block from Step 1)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php payload/`
 Expected: PASS (all four)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/SummaryPayload.php
@@ -456,7 +456,7 @@ git commit -m "feat(sac): split the SSH payload into summary and rule lines"
 
 **Files:** Modify `src/Migration.php`
 
-- [ ] **Step 1: Write the failing test** — add to `Migration::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `Migration::selfChecks()`:
 
 ```php
 'db/migration-configrules-table' => static function (): void {
@@ -470,12 +470,12 @@ git commit -m "feat(sac): split the SSH payload into summary and rule lines"
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php migration-configrules`
 Expected: FAIL — table does not exist
 
-- [ ] **Step 3: Implement** — add to `Migration::define()`:
+- [x] **Step 3: Implement** — add to `Migration::define()`:
 
 ```php
         self::$tables['glpi_plugin_sac_configrules'] = "
@@ -503,12 +503,12 @@ Expected: FAIL — table does not exist
 UNIQUE — unlike the polymorphic `(findings_id, itemtype, items_id)` shape
 riskregister warned about, which silently permits only one untargeted row.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php migration-configrules`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Migration.php
@@ -533,7 +533,7 @@ git commit -m "feat(sac): add glpi_plugin_sac_configrules table"
 - rule absent from `$rules`, row `open` → `state=resolved`, `date_resolved=$dateScan`
 - rule absent, row already `resolved` → untouched
 
-- [ ] **Step 1: Write the failing test** — new file with `sync()`/`openFor()` stubbed, plus:
+- [x] **Step 1: Write the failing test** — new file with `sync()`/`openFor()` stubbed, plus:
 
 ```php
 'db/rulestore-lifecycle' => static function (): void {
@@ -589,12 +589,12 @@ git commit -m "feat(sac): add glpi_plugin_sac_configrules table"
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php rulestore`
 Expected: FAIL — stub returns zero counts
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
     /**
@@ -679,12 +679,12 @@ Expected: FAIL — stub returns zero counts
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php rulestore`
 Expected: PASS (both checks)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/RuleStore.php
@@ -699,7 +699,7 @@ git commit -m "feat(sac): add per-rule store with open/resolved/reopen lifecycle
 
 **Interfaces:** Consumes Tasks 2, 3, 5.
 
-- [ ] **Step 1: Write the failing test** — add to `ConfigScan::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `ConfigScan::selfChecks()`:
 
 ```php
 'db/configscan-processtarget-persists-rules' => static function (): void {
@@ -725,12 +725,12 @@ git commit -m "feat(sac): add per-rule store with open/resolved/reopen lifecycle
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php configscan-processtarget-persists-rules`
 Expected: FAIL — 0 rows, `processTarget()` does not parse rule lines yet
 
-- [ ] **Step 3: Implement** — in `processTarget()`, replace the direct
+- [x] **Step 3: Implement** — in `processTarget()`, replace the direct
   `ScoreLine::parse($value)` call with the payload split, and persist the rules
   after the `_configscan` upsert:
 
@@ -783,12 +783,12 @@ and extend the Finding `$content` with a digest of the worst open rules:
         }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php configscan`
 Expected: PASS, including the pre-existing `processtarget` checks
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/ConfigScan.php
@@ -804,7 +804,7 @@ git commit -m "feat(sac): persist per-rule results and digest them into the Find
 **Contract** (hub §7, riskregister 2.1.0): `Finding_Item::upsertAffected($findingsId, $rows)`,
 rows keyed by `external_key`, returning `['inserted','updated','skipped','controls_linked','refs_unmatched']`.
 
-- [ ] **Step 1: Write the failing test:**
+- [x] **Step 1: Write the failing test:**
 
 ```php
 'sshreader/…' // (not this file)
@@ -852,12 +852,12 @@ rows keyed by `external_key`, returning `['inserted','updated','skipped','contro
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php affected/`
 Expected: FAIL — class does not exist
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
 <?php
@@ -960,12 +960,12 @@ In `ConfigScan::processTarget()`, after `FindingWriter::upsert()` returns the id
 
 (add `RuleStore::allFor()` alongside `openFor()`, same query without the state filter)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php affected/`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/FindingAffected.php src/Compliance/RuleStore.php src/Compliance/ConfigScan.php
@@ -978,7 +978,7 @@ git commit -m "feat(sac): push per-rule results to riskregister affected areas w
 
 **Files:** Create `front/compliancedetail.php`, `templates/compliancedetail.html.twig`; modify `templates/compliance.html.twig`.
 
-- [ ] **Step 1:** The page's own guard is its test, as in Task 11 of the Tier 1 plan:
+- [x] **Step 1:** The page's own guard is its test, as in Task 11 of the Tier 1 plan:
   `db/menu-entry-shape` already asserts every linked page exists, and this page is
   linked from the dashboard rather than the menu, so add to `ConfigScan::selfChecks()`:
 
@@ -988,12 +988,12 @@ git commit -m "feat(sac): push per-rule results to riskregister affected areas w
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php compliancedetail`
 Expected: FAIL — file does not exist
 
-- [ ] **Step 3: Implement** — `front/compliancedetail.php`:
+- [x] **Step 3: Implement** — `front/compliancedetail.php`:
 
 ```php
 <?php
@@ -1038,13 +1038,13 @@ In `templates/compliance.html.twig`, make the fail count link to this page:
 (and pass `detail_url` from `front/compliance.php`, built with
 `Html::getPrefixedUrl('/plugins/sac/front/compliancedetail.php?computers_id=' . $cid)`)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php compliancedetail`
 Expected: PASS. Manual VM check (not scriptable): open the page for a host with
 rules, confirm the list renders and a resolved rule is visually distinct.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add front/compliancedetail.php templates/compliancedetail.html.twig templates/compliance.html.twig front/compliance.php
@@ -1061,26 +1061,26 @@ These change **fresh installs only** — verified against core: `CronTask::regis
 returns early for an already-registered task, and `Config::setDefaults()` only
 writes missing keys. VM-HQ-GLPI was already changed through the UI.
 
-- [ ] **Step 1: Write the failing test** — add to `Config::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `Config::selfChecks()`:
 
 ```php
 sac_assert_eq(self::DEFAULTS['compliance_stale_days'], 45, 'stale threshold matches the monthly cadence — at 14 a monthly scan would flag every host STALE permanently');
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php config/defaults-shape`
 Expected: FAIL — expected 45, got 14
 
-- [ ] **Step 3: Implement** — `Config::DEFAULTS`: `'compliance_stale_days' => 45`.
+- [x] **Step 3: Implement** — `Config::DEFAULTS`: `'compliance_stale_days' => 45`.
   `Cron::register()`: `ConfigScan` registers with `MONTH_TIMESTAMP`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php config/`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Config.php src/Cron.php
@@ -1098,7 +1098,7 @@ already parses the results file; extend it to also emit rule lines, and to resol
 references from `$CONTENT_FILE` (which lives on the host — this is why Design A
 can produce `framework_refs` at all).
 
-- [ ] **Step 1:** Extend the python3 block to collect failing rules:
+- [x] **Step 1:** Extend the python3 block to collect failing rules:
 
 ```python
 kept = {'fail', 'error'}
@@ -1115,7 +1115,7 @@ for rr in test_result.findall('xccdf:rule-result', ns):
     })
 ```
 
-- [ ] **Step 2:** Resolve each rule's title and CIS references from the content
+- [x] **Step 2:** Resolve each rule's title and CIS references from the content
   datastream, using the href substring Task 1 confirmed (`CIS_HREF` below is set
   from that recon, not guessed):
 
@@ -1180,7 +1180,7 @@ for rule in content.iter():
         refs[rid] = ','.join(labelled)
 ```
 
-- [ ] **Step 2b:** Report any CIS href the table does not know, instead of
+- [x] **Step 2b:** Report any CIS href the table does not know, instead of
   dropping it silently. Initialise `unknown_cis_hrefs = {}` before the loop and
   emit one line per unknown href after the rule lines:
 
@@ -1196,7 +1196,7 @@ for href, n in sorted(unknown_cis_hrefs.items()):
   fleet safe:** a host whose content moved to v8 reports itself instead of being
   mislabelled as v7.
 
-- [ ] **Step 3:** Emit one line per rule after the summary line:
+- [x] **Step 3:** Emit one line per rule after the summary line:
 
 ```python
 for r in rules:
@@ -1223,7 +1223,7 @@ sudo -u nginx ssh -i /etc/sac-collect/sac_collect_key \
 
 Expected: the whole multi-line payload, no `authorized_keys` change needed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/host-agent/sac-oscap-summary.sh
@@ -1236,11 +1236,11 @@ git commit -m "feat(sac): emit per-rule SCAP lines from the host wrapper"
 
 **Files:** Modify `setup.php`, `CHANGELOG.md`
 
-- [ ] **Step 1:** `PLUGIN_SAC_VERSION` → `1.8.0-rc1`; CHANGELOG heading `## [1.8.0-rc1] - <date>` with the Added/Changed entries.
-- [ ] **Step 2:** `"/c/php/php.exe" tools/offline-selfcheck.php` → all green.
-- [ ] **Step 3:** Commit, `git tag 1.8.0-rc1`, build `sacv1.8.0-rc1.zip` with
+- [x] **Step 1:** `PLUGIN_SAC_VERSION` → `1.8.0-rc1`; CHANGELOG heading `## [1.8.0-rc1] - <date>` with the Added/Changed entries.
+- [x] **Step 2:** `"/c/php/php.exe" tools/offline-selfcheck.php` → all green.
+- [x] **Step 3:** Commit, `git tag 1.8.0-rc1`, build `sacv1.8.0-rc1.zip` with
       `git archive --format=zip --prefix=sac/ -o sacv1.8.0-rc1.zip HEAD -- . ':!docs' ':!.gitattributes'`.
-- [ ] **Step 4:** Deploy note to the user: this release changes `.twig` files, so
+- [x] **Step 4:** Deploy note to the user: this release changes `.twig` files, so
       **`cache:clear` is required**; the host wrapper must be redeployed to every
       monitored host for rule lines to appear.
 - [ ] **Step 5:** Log to hub §7: version, what shipped, and the first real
@@ -1264,3 +1264,4 @@ git commit -m "feat(sac): emit per-rule SCAP lines from the host wrapper"
   rather than being removed (riskregister's note of 2026-10-15). Correct handling
   needs their explicit removal call; deferred until an SSG version bump actually
   orphans rules.
+
