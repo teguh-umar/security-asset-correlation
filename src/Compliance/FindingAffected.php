@@ -177,8 +177,17 @@ final class FindingAffected
                 'external_key' => (string) $r['rule_id'],
                 'label'        => (string) $r['title'],
                 'severity'     => self::SEVERITY_MAP[(string) $r['severity']] ?? 'Info',
-                'state'        => self::STATE_MAP[(string) $r['state']] ?? 'Open',
             ];
+            // `state` is OMITTED when the caller did not supply one, never
+            // defaulted to 'Open'. The lifecycle lives in RuleStore, so a row
+            // without it is a SAC bug - and under riskregister's contract an
+            // omitted key means "saying nothing, keep what is stored", while
+            // 'Open' would be an assertion. Defaulting would silently REOPEN
+            // a rule a previous scan resolved, sending a person back to
+            // something already fixed. Saying nothing is the honest answer.
+            if (array_key_exists('state', $r)) {
+                $row['state'] = self::STATE_MAP[(string) $r['state']] ?? 'Open';
+            }
             // Verbatim, per the contract: a shape mismatch must surface in
             // riskregister's refs_unmatched, not be smoothed over here.
             $capped = self::capRefs((string) ($r['framework_refs'] ?? ''));
@@ -440,6 +449,23 @@ final class FindingAffected
                 // Dedup must run on the NORMALISED form, or these stay two.
                 $equiv = self::capRefs('CISv7: 4, CISv7:4 ');
                 sac_assert_eq($equiv['sent'], 1, 'CISv7: 4 and CISv7:4 are the same ref to riskregister, so they must be one to us');
+            },
+
+            // RuleStore owns the open/resolved lifecycle, so its rows always
+            // carry a state. A row WITHOUT one is a SAC bug, and the dangerous
+            // reading of it is 'Open': that reopens a rule a previous scan
+            // resolved. Under riskregister's contract, omitting the key says
+            // nothing and keeps the stored state, which is the honest answer.
+            'affected/omits-state-rather-than-assuming-open' => static function (): void {
+                $withState = self::rowsFor([
+                    ['rule_id' => 'r', 'severity' => 'low', 'title' => 't', 'framework_refs' => '', 'state' => 'resolved'],
+                ]);
+                sac_assert_eq($withState[0]['state'], 'Resolved', 'a supplied state is mapped and sent');
+
+                $noState = self::rowsFor([
+                    ['rule_id' => 'r', 'severity' => 'low', 'title' => 't', 'framework_refs' => ''],
+                ]);
+                sac_assert(!array_key_exists('state', $noState[0]), 'no state supplied = key omitted, NOT defaulted to Open, which would reopen a resolved rule');
             },
 
             'db/affected-absent-riskregister-is-safe' => static function (): void {
