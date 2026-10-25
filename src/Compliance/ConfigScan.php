@@ -367,6 +367,23 @@ final class ConfigScan
     public static function selfChecks(): array
     {
         return [
+            // The host wrapper is deployed to a Linux box and started through
+            // /usr/bin/env. One carriage return in it makes the shebang read as
+            // a command name with a CR glued on, and the script dies with
+            // "No such file or directory" before a line of it runs.
+            // .gitattributes marks the file -text so git never rewrites it, but
+            // that also means git faithfully stores CRLF if an editor on Windows
+            // writes it - which is exactly how 1.8.0-rc2 shipped broken. This
+            // check is the part that was missing: it fails here, on the
+            // workstation, instead of on the host after an scp and an install.
+            'hostagent/wrapper-has-unix-line-endings' => static function (): void {
+                $path = dirname(__DIR__, 2) . '/tools/host-agent/sac-oscap-summary.sh';
+                sac_assert(is_readable($path), 'the host wrapper must exist: ' . $path);
+                $raw = (string) file_get_contents($path);
+                sac_assert(substr_count($raw, chr(13)) === 0, 'the host wrapper must use LF line endings only; a CR anywhere breaks /usr/bin/env on the target');
+                sac_assert(str_starts_with($raw, '#!/usr/bin/env bash' . chr(10)), 'and its shebang must be the first line, ending in a bare LF');
+            },
+
             // PURE — runs in tools/offline-selfcheck.php. Covers plan
             // Review Focus #2 (stale data) at the unit level;
             // db/configscan-stale-report-flagged below covers the same
