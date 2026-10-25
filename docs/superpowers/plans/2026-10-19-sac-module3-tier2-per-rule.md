@@ -1205,7 +1205,7 @@ for r in rules:
         r['id'], r['result'], r['severity'], refs.get(r['id'], ''), title))
 ```
 
-- [ ] **Step 4: Verify on a host**
+- [x] **Step 4: Verify on a host** — DONE 2026-10-25 on `vm-dev-damara` (OL 9.3) with 1.8.0-rc3: `Per-rule lines: 57`, matching `fail=57` in the summary, 58 lines total. rc1 produced the same 57 lines, so the rewritten memory-bounded parser is confirmed byte-equivalent on the real 16 MB datastream, not only on fixtures.
 
 ```bash
 sudo /usr/local/sbin/sac-oscap-summary.sh
