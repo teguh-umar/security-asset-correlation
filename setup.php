@@ -4,7 +4,7 @@ use GlpiPlugin\Sac\Menu;
 use GlpiPlugin\Sac\Profile as SacProfile;
 use GlpiPlugin\Sac\SuiteConfig;
 
-define('PLUGIN_SAC_VERSION', '1.8.0-rc3');
+define('PLUGIN_SAC_VERSION', '1.8.0');
 define('PLUGIN_SAC_MIN_GLPI', '11.0.0');
 define('PLUGIN_SAC_MAX_GLPI', '11.9.99');
 
@@ -62,6 +62,7 @@ function plugin_init_sac(): void
 
     // Cron tasks are registered in plugin_sac_install(); nothing needed here.
 }
+
 
 
 

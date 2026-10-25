@@ -1,10 +1,16 @@
 # Changelog
 
-## [1.8.0-rc3] - 2026-10-25
+## [1.8.0] - 2026-10-25
 
-rc2 was broken on arrival: the host wrapper shipped with Windows line endings
-and died at its shebang with `bash\r: No such file or directory`, before a
-single line of it ran. rc2 is superseded and should not be deployed.
+**Module 3 Tier 2: per-rule SCAP results.** Tier 1 reported one score per host;
+this release records every failing rule by name, tracks it until it is fixed, and
+sends it to `riskregister` as an affected area of the host's Finding.
+
+Verified end to end on 2026-10-25: the wrapper produced 57 rule lines on
+`vm-dev-damara` (Oracle Linux 9.3), matching the scan's own `fail` count, and
+after deployment GLPI held 57 rules with 54 carrying CIS references, with no
+control linked automatically — correct, since the content cites CIS Controls v7
+and `riskregister` holds only v8.
 
 ### Fixed
 
@@ -16,12 +22,6 @@ single line of it ran. rc2 is superseded and should not be deployed.
   (`hostagent/wrapper-has-unix-line-endings`), so this fails on the
   workstation instead of on the host after an scp and an install. Verified by
   re-introducing the CRLF: the check fails.
-## [1.8.0-rc2] - 2026-10-25
-
-First run on a real host (`vm-dev-damara`, Oracle Linux 9.3) produced all 57
-rule lines correctly. Reviewing that run turned up three defects, one serious.
-
-### Fixed
 
 - **A failed per-rule parse no longer resolves every open rule.** The wrapper
   used to write the summary line alone when its per-rule step failed, which
@@ -32,20 +32,6 @@ rule lines correctly. Reviewing that run turned up three defects, one serious.
   the stored rules untouched and records it in the Reconcile tab.
 - **A missing rule state is omitted, not read as "Open".** Defaulting would
   have reopened a rule a previous scan resolved.
-
-### Changed
-
-- **The wrapper's memory is now bounded on a real datastream.** It cleared
-  each rule it finished, which does nothing for the large OVAL section that
-  follows the benchmark: measured 22.0 MB peak on a 7.4 MB file shaped like
-  the real one, against 24.2 MB for reading the whole file at once. Freeing
-  everything that ends outside a rule brings it to 1.8 MB. This is headroom
-  for small hosts, not a fix for a failure anyone has seen.
-## [1.8.0-rc1] - 2026-10-25
-
-Module 3 Tier 2: per-rule SCAP results. Tier 1 reported one score per host;
-this release records every failing rule by name, tracks it until it is fixed,
-and sends it to `riskregister` as an affected area of the host's Finding.
 
 ### Added
 
@@ -61,6 +47,13 @@ and sends it to `riskregister` as an affected area of the host's Finding.
   45), matching how often a benchmark realistically changes.
 
 ### Changed
+
+- **The wrapper's memory is now bounded on a real datastream.** It cleared
+  each rule it finished, which does nothing for the large OVAL section that
+  follows the benchmark: measured 22.0 MB peak on a 7.4 MB file shaped like
+  the real one, against 24.2 MB for reading the whole file at once. Freeing
+  everything that ends outside a rule brings it to 1.8 MB. This is headroom
+  for small hosts, not a fix for a failure anyone has seen.
 
 - **A scan that evaluated nothing is refused, not reported as 0.00.** An
   Oracle Linux 9 host carrying only Oracle Linux 7 SCAP content returns every
