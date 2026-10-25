@@ -99,9 +99,21 @@ final class ConfigScan
         global $DB;
         $cid = $target['computers_id'];
 
-        $parsed = ScoreLine::parse($value);
-        if ($parsed === null) {
+        // A pull is one summary line plus zero or more rule lines. Split
+        // first: a payload with no summary line is unusable, and must NOT
+        // reach RuleStore::sync() — an empty rule list there resolves every
+        // open rule on the host, so a truncated transfer would read as
+        // "everything got fixed".
+        $payload = SummaryPayload::split($value);
+        if ($payload['summary'] === null) {
             Reconcile::note('config', 'Computer', $cid, 0, 'bad_summary', $value);
+            $run->bump('errors');
+            return;
+        }
+
+        $parsed = ScoreLine::parse($payload['summary']);
+        if ($parsed === null) {
+            Reconcile::note('config', 'Computer', $cid, 0, 'bad_summary', $payload['summary']);
             $run->bump('errors');
             return;
         }
@@ -133,6 +145,54 @@ final class ConfigScan
             $DB->insert('glpi_plugin_sac_configscan', $scanRow);
         }
 
+        // Only reached with a summary that parsed, so an empty $rules here
+        // genuinely means "this scan found nothing failing" — not "the pull
+        // failed", which returned above.
+        $rules = [];
+        foreach ($payload['rules'] as $ruleLine) {
+            $rule = RuleLine::parse($ruleLine);
+            if ($rule !== null) {
+                $rules[] = $rule;
+            }
+        }
+        // A host that could not parse its own rules has said nothing about
+        // what is failing. Syncing an empty list here would mark every open
+        // rule it holds RESOLVED - telling a person 57 findings were fixed, on
+        // the word of a host that never claimed it. Leave the rules untouched
+        // and record why, so the gap is visible instead of silent.
+        if (SummaryPayload::hasRuleParseFailure($payload['notes'])) {
+            Reconcile::note(
+                'config',
+                'Computer',
+                $cid,
+                0,
+                'rule_parse_failed',
+                'the host wrapper could not parse per-rule results; existing rules left as they were'
+            );
+            $run->bump('errors');
+        } else {
+            RuleStore::sync($cid, $rules, $parsed['date_scan']);
+        }
+
+        // Surfaced per host, because it IS per host: one server's SSG can
+        // move to a newer CIS edition while the rest of the fleet stays put.
+        // Without this the only symptom would be refs quietly disappearing
+        // from that host's findings.
+        foreach ($payload['notes'] as $noteLine) {
+            $parts = explode('|', $noteLine, 4);
+            if (count($parts) < 3 || $parts[1] !== 'unknown_cis_href') {
+                continue;
+            }
+            Reconcile::note(
+                'config',
+                'Computer',
+                $cid,
+                0,
+                'unknown_cis_href',
+                sprintf('%s (%s reference(s)) — recon this host and add it to CIS_HREFS', $parts[2], $parts[3] ?? '?')
+            );
+        }
+
         $code = Code::configScore($cid);
         $sev  = Severity::forConfigScore($parsed['score'], $critical, $high, $medium);
 
@@ -156,6 +216,25 @@ final class ConfigScan
             $parsed['date_scan'],
             $stale ? "\n\n[STALE — host's own scan timestamp is over {$staleDays} days old]" : ''
         );
+
+        // A digest of the worst open rules, so the Finding alone is enough
+        // to start mitigating. The full checklist lives on SAC's own page —
+        // 55 rules in one text field is unreadable, which is the complaint
+        // this whole phase exists to answer.
+        $openRules = RuleStore::openFor($cid);
+        if ($openRules !== []) {
+            $content .= "\n\n" . __('Top failing rules:', 'sac');
+            foreach (array_slice($openRules, 0, 10) as $r) {
+                $content .= sprintf("\n- [%s] %s", (string) $r['severity'], (string) $r['title']);
+            }
+            $remaining = count($openRules) - 10;
+            if ($remaining > 0) {
+                $content .= "\n" . sprintf(
+                    __('…and %d more — see Config compliance in SAC for the full checklist.', 'sac'),
+                    $remaining
+                );
+            }
+        }
 
         $entity = $target['entities_id'];
 
@@ -183,7 +262,42 @@ final class ConfigScan
             'plugin_riskregister_riskcategories_id' => $catId,
         ];
 
-        FindingWriter::upsert($input, [$cid], '', $run);
+        $findingId = FindingWriter::upsert($input, [$cid], '', $run);
+        if ($findingId !== null) {
+            // Open AND resolved rules: a fixed item should show as Resolved
+            // on the Finding, not vanish from it. No-op until riskregister
+            // 2.1.0 is installed (FindingAffected guards on method_exists).
+            $pushed = FindingAffected::push($findingId, RuleStore::allFor($cid));
+
+            // riskregister's framework_refs column is varchar(255); refs past
+            // it are dropped whole rather than cut mid-ref. Recorded against
+            // the host so it shows in Reconcile, because the content DID
+            // supply those refs and nothing else would ever say they are gone.
+            // Malformed refs mean SAC's OWN host wrapper emitted something
+            // unparseable — never riskregister's fault, and invisible there
+            // because they are removed before the wire.
+            if (!empty($pushed['refs_malformed'])) {
+                Reconcile::note(
+                    'config',
+                    'Computer',
+                    $cid,
+                    0,
+                    'refs_malformed',
+                    sprintf('%d unparseable framework ref(s) from the host wrapper', (int) $pushed['refs_malformed'])
+                );
+            }
+
+            if (!empty($pushed['refs_dropped'])) {
+                Reconcile::note(
+                    'config',
+                    'Computer',
+                    $cid,
+                    0,
+                    'refs_truncated',
+                    sprintf('%d framework ref(s) dropped to fit 255 chars', (int) $pushed['refs_dropped'])
+                );
+            }
+        }
     }
 
     /**
@@ -253,6 +367,23 @@ final class ConfigScan
     public static function selfChecks(): array
     {
         return [
+            // The host wrapper is deployed to a Linux box and started through
+            // /usr/bin/env. One carriage return in it makes the shebang read as
+            // a command name with a CR glued on, and the script dies with
+            // "No such file or directory" before a line of it runs.
+            // .gitattributes marks the file -text so git never rewrites it, but
+            // that also means git faithfully stores CRLF if an editor on Windows
+            // writes it - which is exactly how 1.8.0-rc2 shipped broken. This
+            // check is the part that was missing: it fails here, on the
+            // workstation, instead of on the host after an scp and an install.
+            'hostagent/wrapper-has-unix-line-endings' => static function (): void {
+                $path = dirname(__DIR__, 2) . '/tools/host-agent/sac-oscap-summary.sh';
+                sac_assert(is_readable($path), 'the host wrapper must exist: ' . $path);
+                $raw = (string) file_get_contents($path);
+                sac_assert(substr_count($raw, chr(13)) === 0, 'the host wrapper must use LF line endings only; a CR anywhere breaks /usr/bin/env on the target');
+                sac_assert(str_starts_with($raw, '#!/usr/bin/env bash' . chr(10)), 'and its shebang must be the first line, ending in a bare LF');
+            },
+
             // PURE — runs in tools/offline-selfcheck.php. Covers plan
             // Review Focus #2 (stale data) at the unit level;
             // db/configscan-stale-report-flagged below covers the same
@@ -361,6 +492,70 @@ final class ConfigScan
                     foreach (array_keys($f->find(['entities_id' => 0, 'code' => $code])) as $fid) {
                         $f->delete(['id' => (int) $fid], true);
                     }
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            // The dashboard links to this page by URL rather than through
+            // the menu, so Menu's own page-exists loop does not cover it.
+            'compliancedetail/page-exists' => static function (): void {
+                sac_assert(
+                    is_file(dirname(__DIR__, 2) . '/front/compliancedetail.php'),
+                    'the per-host checklist page the dashboard links to exists'
+                );
+            },
+
+            'db/configscan-processtarget-persists-rules' => static function (): void {
+                global $DB;
+                $cid = (int) (new \Computer())->add(['name' => '__sac_pt_rules__', 'entities_id' => 0]);
+                $target = ['computers_id' => $cid, 'entities_id' => 0, 'name' => '__sac_pt_rules__'];
+                $catId = FindingWriter::categoryId('Configuration Compliance', 0);
+                try {
+                    $payload = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n"
+                             . "SACRULE1|rule_a|fail|high|CISv7:4|Disable root login\n"
+                             . "SACRULE1|rule_b|fail|low||Set umask\n";
+                    $run = RunLog::begin('selftest');
+                    self::processTarget($target, $payload, $catId, null, $run);
+                    $run->finish('ok');
+
+                    $rows = iterator_to_array($DB->request([
+                        'FROM'  => 'glpi_plugin_sac_configrules',
+                        'WHERE' => ['computers_id' => $cid],
+                    ]));
+                    sac_assert_eq(count($rows), 2, 'both rules persisted');
+                } finally {
+                    $DB->delete('glpi_plugin_sac_configrules', ['computers_id' => $cid]);
+                    $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
+                    (new \Computer())->delete(['id' => $cid], true);
+                }
+            },
+
+            // Review Focus #1 end-to-end: a payload whose summary line was
+            // lost must leave existing open rules alone. The naive reading
+            // of "no summary, two rule lines missing" is "zero failing", and
+            // RuleStore::sync() would then resolve the lot.
+            'db/configscan-truncated-payload-resolves-nothing' => static function (): void {
+                global $DB;
+                $cid = (int) (new \Computer())->add(['name' => '__sac_pt_trunc__', 'entities_id' => 0]);
+                $target = ['computers_id' => $cid, 'entities_id' => 0, 'name' => '__sac_pt_trunc__'];
+                $catId = FindingWriter::categoryId('Configuration Compliance', 0);
+                try {
+                    $good = "SACCFG1|bm|49.17|22|55|753|2026-10-14T11:55:14+0700\n"
+                          . "SACRULE1|rule_a|fail|high||Disable root login\n";
+                    $run = RunLog::begin('selftest');
+                    self::processTarget($target, $good, $catId, null, $run);
+
+                    sac_assert_eq(count(RuleStore::openFor($cid)), 1, 'one rule open after the good scan');
+
+                    // Same host, next run, payload truncated to nothing usable.
+                    self::processTarget($target, "garbage with no summary line\n", $catId, null, $run);
+                    $run->finish('ok');
+
+                    sac_assert_eq(count(RuleStore::openFor($cid)), 1, 'the open rule survives an unusable pull — it is NOT silently resolved');
+                } finally {
+                    $DB->delete('glpi_plugin_sac_reconcile', ['ref_itemtype' => 'Computer', 'ref_id' => $cid]);
+                    $DB->delete('glpi_plugin_sac_configrules', ['computers_id' => $cid]);
                     $DB->delete('glpi_plugin_sac_configscan', ['computers_id' => $cid]);
                     (new \Computer())->delete(['id' => $cid], true);
                 }

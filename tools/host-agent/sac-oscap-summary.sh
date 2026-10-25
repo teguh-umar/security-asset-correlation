@@ -3,7 +3,8 @@
 # SAC Module 3 Phase 1 (Config Compliance, Tier 1) — host-side collector.
 #
 # Runs on the MONITORED host (not the GLPI server), as root via cron.
-# Evaluates a CIS profile with `oscap`, then writes ONE line to
+# Evaluates a CIS profile with `oscap`, then writes a summary line plus one
+# line per FAILING rule to
 # $OUTPUT_FILE in the exact format GlpiPlugin\Sac\Compliance\ScoreLine
 # expects:
 #
@@ -69,6 +70,21 @@ if [ -z "$CONTENT_FILE" ] || [ ! -f "$CONTENT_FILE" ]; then
     exit 1
 fi
 log "Using content: $CONTENT_FILE"
+
+# The product-exclusion list above can tell OS content from browser content,
+# but not one OS VERSION from another: on an OL9 host carrying only
+# ssg-ol7-ds.xml it picks the ol7 file and oscap then reports every rule as
+# notapplicable. Observed on vm-hq-glpi, 2026-10-22: 978 rules, 0 pass,
+# 0 fail, score 0.00. Warn loudly; the hard stop is the pass+fail check below,
+# which catches the same thing without having to know OS naming conventions.
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    OS_TAG="${ID:-}${VERSION_ID%%.*}"
+    case "$(basename "$CONTENT_FILE")" in
+        *"$OS_TAG"*) : ;;
+        *) log "WARNING: content $(basename "$CONTENT_FILE") does not look like it matches this host ($OS_TAG). Rules may all come back notapplicable. Install the matching scap-security-guide content, or set SAC_CONTENT_FILE." ;;
+    esac
+fi
 
 if [ -z "$PROFILE_ID" ]; then
     # Extract any profile id substring anywhere in `oscap info`'s output,
@@ -183,6 +199,180 @@ if [ -z "$LINE" ]; then
 fi
 log "Summary line: $LINE"
 
+# A scan where NOTHING was evaluated is not a score of zero, it is a failed
+# scan. Writing it would hand SAC a 0.00 that its thresholds read as Critical,
+# and a host would be reported as maximally non-compliant because its content
+# did not match. Refusing to write leaves the previous file in place, so the
+# host ages into SAC's "stale" handling instead — which says "this host has
+# not reported", which is the truth.
+# A genuinely clean host has fail=0 but pass>0, so it is unaffected.
+PASS_N=$(printf '%s' "$LINE" | cut -d'|' -f4)
+FAIL_N=$(printf '%s' "$LINE" | cut -d'|' -f5)
+if [ "$((PASS_N + FAIL_N))" -eq 0 ]; then
+    log "REFUSING to write: the scan evaluated nothing (pass=0, fail=0, other=$(printf '%s' "$LINE" | cut -d'|' -f6))."
+    log "This is a broken scan, not a score of 0. Almost always the content does not match the OS:"
+    log "  host content : $CONTENT_FILE"
+    log "  host OS      : ${PRETTY_NAME:-unknown}"
+    log "Install the matching scap-security-guide, or set SAC_CONTENT_FILE. $OUTPUT_FILE is left untouched."
+    exit 1
+fi
+
+# ---- Parse the same results into per-rule SACRULE1 lines ------------------
+# Deliberately a SECOND, separate step rather than folded into the summary
+# parser above. If anything here fails - an SSG layout this does not expect,
+# python running out of memory on a large datastream - the host still
+# reports its score exactly as it did before 1.8.0. A host that goes quiet
+# is worse than a host with no per-rule detail: SAC reads a missing summary
+# as a broken pull and, correctly, refuses to act on it.
+
+RULE_LINES=""
+set +e
+RULE_LINES=$(python3 - "$RESULTS_XML" "$CONTENT_FILE" <<'PYEOF'
+# ---- Per-rule lines (SACRULE1) and content notes (SACNOTE1) ---------------
+import sys
+import xml.etree.ElementTree as ET
+
+results_path, content_path = sys.argv[1], sys.argv[2]
+XCCDF = 'http://checklists.nist.gov/xccdf/1.2'
+ns = {'xccdf': XCCDF}
+
+# Each <reference> is labelled from ITS OWN href, never from one per-host
+# prefix: the fleet can mix SSG versions, and one datastream can carry
+# several CIS reference sets. Only hrefs confirmed by recon on a real host
+# belong here -- an unrecognised one is reported, never guessed at, because
+# a wrong control reference is worse than a missing one.
+CIS_HREFS = {
+    # href substring            -> riskregister framework shortname
+    'cisecurity.org/controls/': 'CISv7',
+    #   ^ confirmed on vm-dev-damara, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
+    #     bare integer codes, observed set 1-9,11-16,18-20. Codes reaching
+    #     20 is what identifies v7; v8 has 18 controls.
+    # Add a v8 entry ONLY after running the recon on a host that carries it.
+}
+
+unknown_cis = {}
+
+
+def label_for(href, code):
+    """Framework shortname for one reference, or None to skip it."""
+    for frag, short in CIS_HREFS.items():
+        if frag not in href:
+            continue
+        # v7 cites whole controls ("19"), v8 cites dotted safeguards ("4.1").
+        # A shape that contradicts the label its href earned means the table
+        # is out of date for this host: report rather than mislabel.
+        if short == 'CISv7' and '.' in code:
+            return None
+        return short
+    return None
+
+
+# 1. Which rules failed. Only fail/error are sent: a pass is not a finding,
+#    and shipping ~750 passes per host would dwarf the payload.
+wanted = {}
+order = []
+troot = ET.parse(results_path).getroot()
+tr = troot if troot.tag.endswith('TestResult') else troot.find('.//xccdf:TestResult', ns)
+if tr is None:
+    sys.exit(0)   # no TestResult: the summary block already reported that
+
+for rr in tr.findall('xccdf:rule-result', ns):
+    res_el = rr.find('xccdf:result', ns)
+    status = res_el.text.strip() if res_el is not None and res_el.text else ''
+    if status not in ('fail', 'error'):
+        continue
+    rid = rr.get('idref', '')
+    if not rid or rid in wanted:
+        continue
+    wanted[rid] = {'result': status, 'severity': (rr.get('severity') or '').strip().lower()}
+    order.append(rid)
+
+if not wanted:
+    sys.exit(0)
+
+# 2. Titles and references, from the CONTENT datastream. Read with iterparse
+#    and cleared as it goes: the OL9 datastream is 16 MB and a full ET.parse()
+#    of it costs several hundred MB on a host that may be small, while only a
+#    few dozen failing rules out of ~800 are ever needed.
+titles, refs = {}, {}
+context = ET.iterparse(content_path, events=('start', 'end'))
+_, root = next(context)
+in_rule = 0
+for ev, el in context:
+    is_rule = el.tag.endswith('}Rule')
+    if ev == 'start':
+        if is_rule:
+            in_rule += 1
+        continue
+    if is_rule:
+        in_rule -= 1
+        rid = el.get('id', '')
+        if rid in wanted:
+            t = el.find('xccdf:title', ns)
+            if t is not None and t.text:
+                titles[rid] = ' '.join(t.text.split())
+            if not wanted[rid]['severity']:
+                wanted[rid]['severity'] = (el.get('severity') or '').strip().lower()
+            labelled, seen = [], set()
+            for r in el.findall('xccdf:reference', ns):
+                href = r.get('href') or ''
+                code = (r.text or '').strip()
+                if not code:
+                    continue
+                # PCI DSS refs in this content carry no href at all, so they
+                # fall out here without needing an exclusion of their own.
+                short = label_for(href, code)
+                if short is None:
+                    if 'cisecurity.org' in href:
+                        unknown_cis[href] = unknown_cis.get(href, 0) + 1
+                    continue
+                pair = short + ':' + code
+                if pair in seen:
+                    continue   # riskregister discards a repeated pair anyway
+                seen.add(pair)
+                labelled.append(pair)
+            if labelled:
+                refs[rid] = ','.join(labelled)
+        el.clear()
+        root.clear()
+    elif in_rule == 0:
+        # Anything that ends OUTSIDE a Rule is freed immediately. This is what
+        # actually bounds memory: a real SSG datastream carries a large OVAL
+        # section AFTER the Benchmark, and clearing only Rules leaves all of it
+        # in memory. Measured on a 7.4 MB file shaped like the real one:
+        # 22.0 MB peak before, 1.8 MB after.
+        el.clear()
+        root.clear()
+
+# 3. Emit. A title may legitimately contain '|' (the PHP parser splits on a
+#    field limit and keeps the remainder), but never a newline.
+for rid in order:
+    info = wanted[rid]
+    title = titles.get(rid, rid).replace('\n', ' ').replace('\r', ' ')
+    print("SACRULE1|{}|{}|{}|{}|{}".format(
+        rid, info['result'], info['severity'] or 'unknown', refs.get(rid, ''), title))
+
+for href, n in sorted(unknown_cis.items()):
+    print("SACNOTE1|unknown_cis_href|{}|{}".format(href, n))
+PYEOF
+)
+RULES_RC=$?
+set -e
+
+if [ "$RULES_RC" -ne 0 ]; then
+    log "Per-rule parsing failed (rc=$RULES_RC) - writing the summary line plus a rule_parse_failed note, so SAC leaves the existing rules alone instead of resolving them"
+    # Say so in the payload, not only in a log nobody reads. Without this
+    # line SAC cannot tell 'parsing broke' from 'this host has nothing
+    # failing', and would resolve every open rule it holds for the host.
+    RULE_LINES="SACNOTE1|rule_parse_failed|$RULES_RC"
+else
+    log "Per-rule lines: $(printf '%s' "$RULE_LINES" | grep -c '^SACRULE1|' || true)"
+    NOTES=$(printf '%s' "$RULE_LINES" | grep -c '^SACNOTE1|' || true)
+    if [ "$NOTES" -gt 0 ]; then
+        log "Content notes: $NOTES CIS reference href(s) SAC does not recognise - see the Reconcile tab"
+    fi
+fi
+
 # ---- Write atomically -------------------------------------------------
 # Write to a temp file in the SAME directory (so the final `mv` is an
 # atomic rename, not a cross-filesystem copy) and only replace the real
@@ -199,7 +389,14 @@ TMP_OUTPUT="$(mktemp "$OUTPUT_DIR/.oscap_summary.XXXXXX")"
 # so it silently goes stale with no obvious cause. `rm -f` is a no-op once
 # the file has already been moved away by a successful run below.
 trap 'rm -rf "$WORKDIR"; rm -f "$TMP_OUTPUT"' EXIT
-printf '%s\n' "$LINE" > "$TMP_OUTPUT"
+# The summary line MUST be first: SummaryPayload::split() treats anything
+# before it as banner noise, and a payload without it as an unusable pull.
+{
+    printf '%s\n' "$LINE"
+    if [ -n "$RULE_LINES" ]; then
+        printf '%s\n' "$RULE_LINES"
+    fi
+} > "$TMP_OUTPUT"
 chown "$OUTPUT_OWNER" "$TMP_OUTPUT"
 chmod "$OUTPUT_MODE" "$TMP_OUTPUT"
 mv -f "$TMP_OUTPUT" "$OUTPUT_FILE"
