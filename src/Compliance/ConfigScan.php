@@ -155,7 +155,24 @@ final class ConfigScan
                 $rules[] = $rule;
             }
         }
-        RuleStore::sync($cid, $rules, $parsed['date_scan']);
+        // A host that could not parse its own rules has said nothing about
+        // what is failing. Syncing an empty list here would mark every open
+        // rule it holds RESOLVED - telling a person 57 findings were fixed, on
+        // the word of a host that never claimed it. Leave the rules untouched
+        // and record why, so the gap is visible instead of silent.
+        if (SummaryPayload::hasRuleParseFailure($payload['notes'])) {
+            Reconcile::note(
+                'config',
+                'Computer',
+                $cid,
+                0,
+                'rule_parse_failed',
+                'the host wrapper could not parse per-rule results; existing rules left as they were'
+            );
+            $run->bump('errors');
+        } else {
+            RuleStore::sync($cid, $rules, $parsed['date_scan']);
+        }
 
         // Surfaced per host, because it IS per host: one server's SSG can
         // move to a newer CIS edition while the rest of the fleet stays put.
