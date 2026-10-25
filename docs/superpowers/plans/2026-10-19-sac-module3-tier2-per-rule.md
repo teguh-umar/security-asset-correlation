@@ -1,6 +1,6 @@
 # SAC 1.8.0 — Module 3 Tier 2 (per-rule SCAP results) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Turn "49.17%, 55 fail" into an actionable list — store each failing SCAP
 rule per host, close it automatically when a later scan shows it fixed, reopen it
@@ -36,9 +36,39 @@ agreement; where this plan and they disagree, they win.
 - **Absence never means fixed.** A host that is unreachable, or whose oscap cron did
   not run, yields an empty rule list. Only a scan that actually produced a summary
   line may resolve anything.
-- **Framework refs pass through verbatim.** Send `CISv8:4.1` exactly as the content
+- **Framework refs pass through verbatim.** Send `CISv7:19` exactly as the content
   states it, normalised only to `shortname:code`. Never map or re-interpret — a
   mismatch must surface in riskregister's `refs_unmatched`, not be smoothed over.
+  (The label comes from each ref's own href; see Task 1's answer.)
+- **`framework_refs` must fit 255 bytes** (riskregister session, 2026-10-22: the
+  column is `varchar(255)` until their 2.2.0 moves refs to a child table). SAC
+  builds the list to fit, dropping WHOLE refs from the end and recording the count
+  through `Reconcile::note('refs_truncated')`. Letting MySQL do the cutting is not
+  an option: it cuts mid-ref, `RefList::parse()` then drops the malformed tail
+  with a bare `continue` that `refs_unmatched` never counts, and a cut landing
+  inside a code (`CISv7:19` -> `CISv7:1`) still parses as a valid pair pointing at
+  the WRONG control. Pinned by `affected/caps-framework-refs-at-255`.
+- **Refs are normalised exactly as `RefList::parse()` does, in this order:**
+  trim around the pair and around each part (`CISv7: 4` is `CISv7:4`) -> drop a
+  malformed entry (no colon, empty framework, or empty code) -> dedup **on the
+  normalised form** -> cap -> count. Any other order breaks the count: SAC would
+  claim refs riskregister does not parse, and 2.2.0 would refuse the row with a
+  symptom that looks like truncation. Malformed refs are reported separately via
+  `Reconcile::note('refs_malformed')`, because they mean SAC's own host wrapper
+  emitted junk and they never reach riskregister to be noticed there. Pinned by
+  `affected/normalises-refs-like-riskregister`.
+- **Refs are deduplicated before the cap.** riskregister's `RefList::parse()`
+  discards a repeated `framework:code` pair, so a duplicate adds nothing but can
+  still spend the 255 and evict a DISTINCT ref. Pinned by
+  `affected/deduplicates-refs-before-capping`.
+- **Each row with refs also carries `framework_refs_sent`** (riskregister session,
+  2026-10-22): the count of refs in that row's string **after** the cap, per row,
+  never batch-level. riskregister 2.2.0 refuses a row whose parsed count disagrees,
+  which is how a ref truncated in transit is caught — a cut ref cannot be
+  recognised from itself. 2.1.0 builds its input from an allow-list
+  (`Finding_Item::upsertRows()`), so the key is ignored until then: sending it in
+  1.8.0 is preparation, not behaviour. Omitted together with the refs, never sent
+  as a bare 0. Pinned by `affected/refs-sent-count-matches-the-string`.
 - **Omitting a field is not the same as sending it empty** (riskregister contract
   change, hub §7 2026-10-19). An omitted key leaves the stored value alone; `''`
   erases it. SAC therefore never sends `description` (a human's remediation note
@@ -104,14 +134,14 @@ agreement; where this plan and they disagree, they win.
 **Not a code task.** The CIS-reference parsing in Task 10 is written against what
 this returns. Guessing a data shape is exactly what cost this project v1.7.0.
 
-- [ ] **Step 1:** On a monitored host, list the distinct reference shapes:
+- [x] **Step 1:** On a monitored host, list the distinct reference shapes:
 
 ```bash
 grep -o '<reference href="[^"]*"[^>]*>[^<]*</reference>' \
   /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml | sort -u | head -30
 ```
 
-- [ ] **Step 2:** Confirm whether CIS references are present at all, and under which
+- [x] **Step 2:** Confirm whether CIS references are present at all, and under which
   href:
 
 ```bash
@@ -119,7 +149,64 @@ grep -o 'href="[^"]*"' /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml \
   | sort | uniq -c | sort -rn | head -20
 ```
 
-- [ ] **Step 3:** Record the answer here, in this task, before starting Task 10:
+- [x] **ANSWER — recon run on `vm-dev-damara` (Oracle Linux 9), 2026-10-22.**
+
+  The content dir holds two datastreams, `ssg-firefox-ds.xml` and
+  `ssg-ol9-ds.xml` (16 MB, dated Sep 2023). The wrapper's product-exclusion
+  list correctly selects the ol9 one, so the hardcoded `ssg-ol9-ds.xml` in the
+  commands above happens to be right on THIS host — but auto-detect is what
+  actually decides, and a host with different content would diverge.
+
+  - **Element shape:** `<xccdf-1.2:reference href="...">CODE</xccdf-1.2:reference>`
+  - **Namespace URI:** `http://checklists.nist.gov/xccdf/1.2` (prefix `xccdf-1.2:`).
+    Task 10's `ns` map already uses this URI, so it needs no change — ElementTree
+    resolves by URI, not by prefix.
+  - **`CIS_HREF` = `cisecurity.org/controls/`** (full value
+    `https://www.cisecurity.org/controls/`), 3654 occurrences.
+  - **Code format: bare integers. No dotted sub-controls anywhere.** The full set
+    of distinct codes present is `1 2 3 4 5 6 7 8 9 11 12 13 14 15 16 18 19 20`
+    (10 and 17 are absent — no rule references them). The project note about CIS
+    sub-control refs truncating to a parent number (`5.2` -> `5`) therefore does
+    NOT apply to this content: nothing needs truncating.
+  - **PCI DSS references are excluded for free.** They appear as
+    `<xccdf-1.2:reference>https://www.pcisecuritystandards.org/...</...>` with
+    **no `href` attribute at all**, so selecting on the href substring drops them.
+    (Beware a naive text search for `cisecurity`: it also matches
+    `p-cisecurity-standards`.)
+
+  - **RESOLVED by the orchestrator's ruling, hub §7 2026-10-22: send `CISv7:<n>`,
+    exactly as the content states.** riskregister's 2.1.0 contract keeps an
+    unmatched ref as stored text, counts it in `refs_unmatched`, and never
+    invents or guesses a control (verified in its
+    `Finding_Item::linkFrameworkRefs()`: an unknown framework shortname
+    increments `unmatched` and skips). It has no `CISv7` framework today, so
+    every ref lands as text and nothing is mislinked - strictly better than
+    omitting refs, which would throw away data a later v7->v8 mapping needs.
+    Do NOT send `CISv8`, and do NOT send a neutral `CIS:`.
+    Pinned by `affected/passes-cisv7-codes-through-untouched`.
+
+  - ⚠️ **FLEET CAVEAT (user, 2026-10-22): other hosts may be on v8 content.**
+    This recon covers ONE host. A newer SSG, or a different OS, can reference
+    CIS v8 (dotted safeguards like `4.1`), and one datastream can even carry
+    several CIS reference sets. **Task 10 therefore labels each `<reference>`
+    from its own href, never with a per-host prefix**, keeps a table of only
+    recon-confirmed hrefs, and reports an unrecognised CIS href via
+    `Reconcile::note()` instead of guessing. Re-run this recon on the first
+    non-OL9 host added to the fleet, and add its href to the table before
+    expecting refs from it.
+
+  - **Original finding (kept for the record) — this content references CIS Controls v7, not v8.**
+    The codes run to 20; CIS v8 has only 18 controls, v7 has 20. Emitting these
+    as `CISv8:<n>`, as Task 10 Step 2 currently does, mislabels them. riskregister's
+    `cis_v8.csv` holds controls 1-18, so `19`/`20` would match nothing, and 1-18
+    would match the WRONG control, because v8 reorganised v7 rather than trimming
+    it. A silently wrong control reference is worse than none.
+    **Task 10 must not use the `CISv8:` prefix until this is resolved.** Options:
+    emit `CISv7:<n>` and let riskregister decide whether it can map v7, or emit a
+    neutral `CIS:<n>`, or send nothing. Needs the riskregister session's input,
+    since it owns the framework tables.
+
+- [x] **Step 3 (original instruction):** Record the answer here, in this task, before starting Task 10:
   the href substring that identifies CIS, and the exact code format (`4.1` vs
   `CIS-4.1` vs `4`). If the content carries **no** CIS references (plausible — this
   is the `standard` profile on Oracle Linux, which has no CIS profile at all), say
@@ -141,7 +228,7 @@ SACRULE1|<rule_id>|<result>|<severity>|<framework_refs>|<title>
 `framework_refs` may be empty. `title` is last **on purpose** so a title containing
 `|` cannot shift the other fields.
 
-- [ ] **Step 1: Write the failing test** — new file, with `parse()` stubbed to `return null;`:
+- [x] **Step 1: Write the failing test** — new file, with `parse()` stubbed to `return null;`:
 
 ```php
 <?php
@@ -190,12 +277,12 @@ final class RuleLine
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php ruleline/`
 Expected: FAIL on `ruleline/parses-well-formed` ("well-formed line parses")
 
-- [ ] **Step 3: Implement** — replace the stub:
+- [x] **Step 3: Implement** — replace the stub:
 
 ```php
     private const TAG = 'SACRULE1';
@@ -239,12 +326,12 @@ Expected: FAIL on `ruleline/parses-well-formed` ("well-formed line parses")
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php ruleline/`
 Expected: PASS (all four checks)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/RuleLine.php
@@ -264,7 +351,7 @@ This is where Review Focus #1 is enforced: `summary` is null unless the FIRST
 non-empty line is a summary line, and a caller must treat a null summary as "this
 pull told us nothing", never as "no rules are failing".
 
-- [ ] **Step 1: Write the failing test** — new file, `split()` stubbed to `return ['summary' => null, 'rules' => []];`:
+- [x] **Step 1: Write the failing test** — new file, `split()` stubbed to `return ['summary' => null, 'rules' => []];`:
 
 ```php
 'payload/splits-summary-and-rules' => static function (): void {
@@ -296,12 +383,12 @@ pull told us nothing", never as "no rules are failing".
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php payload/`
 Expected: FAIL on `payload/splits-summary-and-rules`
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
 <?php
@@ -351,12 +438,12 @@ final class SummaryPayload
 
 (plus the `selfChecks()` block from Step 1)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php payload/`
 Expected: PASS (all four)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/SummaryPayload.php
@@ -369,7 +456,7 @@ git commit -m "feat(sac): split the SSH payload into summary and rule lines"
 
 **Files:** Modify `src/Migration.php`
 
-- [ ] **Step 1: Write the failing test** — add to `Migration::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `Migration::selfChecks()`:
 
 ```php
 'db/migration-configrules-table' => static function (): void {
@@ -383,12 +470,12 @@ git commit -m "feat(sac): split the SSH payload into summary and rule lines"
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php migration-configrules`
 Expected: FAIL — table does not exist
 
-- [ ] **Step 3: Implement** — add to `Migration::define()`:
+- [x] **Step 3: Implement** — add to `Migration::define()`:
 
 ```php
         self::$tables['glpi_plugin_sac_configrules'] = "
@@ -416,12 +503,12 @@ Expected: FAIL — table does not exist
 UNIQUE — unlike the polymorphic `(findings_id, itemtype, items_id)` shape
 riskregister warned about, which silently permits only one untargeted row.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php migration-configrules`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Migration.php
@@ -446,7 +533,7 @@ git commit -m "feat(sac): add glpi_plugin_sac_configrules table"
 - rule absent from `$rules`, row `open` → `state=resolved`, `date_resolved=$dateScan`
 - rule absent, row already `resolved` → untouched
 
-- [ ] **Step 1: Write the failing test** — new file with `sync()`/`openFor()` stubbed, plus:
+- [x] **Step 1: Write the failing test** — new file with `sync()`/`openFor()` stubbed, plus:
 
 ```php
 'db/rulestore-lifecycle' => static function (): void {
@@ -502,12 +589,12 @@ git commit -m "feat(sac): add glpi_plugin_sac_configrules table"
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php rulestore`
 Expected: FAIL — stub returns zero counts
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
     /**
@@ -592,12 +679,12 @@ Expected: FAIL — stub returns zero counts
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php rulestore`
 Expected: PASS (both checks)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/RuleStore.php
@@ -612,7 +699,7 @@ git commit -m "feat(sac): add per-rule store with open/resolved/reopen lifecycle
 
 **Interfaces:** Consumes Tasks 2, 3, 5.
 
-- [ ] **Step 1: Write the failing test** — add to `ConfigScan::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `ConfigScan::selfChecks()`:
 
 ```php
 'db/configscan-processtarget-persists-rules' => static function (): void {
@@ -638,12 +725,12 @@ git commit -m "feat(sac): add per-rule store with open/resolved/reopen lifecycle
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php configscan-processtarget-persists-rules`
 Expected: FAIL — 0 rows, `processTarget()` does not parse rule lines yet
 
-- [ ] **Step 3: Implement** — in `processTarget()`, replace the direct
+- [x] **Step 3: Implement** — in `processTarget()`, replace the direct
   `ScoreLine::parse($value)` call with the payload split, and persist the rules
   after the `_configscan` upsert:
 
@@ -696,12 +783,12 @@ and extend the Finding `$content` with a digest of the worst open rules:
         }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php configscan`
 Expected: PASS, including the pre-existing `processtarget` checks
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/ConfigScan.php
@@ -717,7 +804,7 @@ git commit -m "feat(sac): persist per-rule results and digest them into the Find
 **Contract** (hub §7, riskregister 2.1.0): `Finding_Item::upsertAffected($findingsId, $rows)`,
 rows keyed by `external_key`, returning `['inserted','updated','skipped','controls_linked','refs_unmatched']`.
 
-- [ ] **Step 1: Write the failing test:**
+- [x] **Step 1: Write the failing test:**
 
 ```php
 'sshreader/…' // (not this file)
@@ -765,12 +852,12 @@ rows keyed by `external_key`, returning `['inserted','updated','skipped','contro
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php affected/`
 Expected: FAIL — class does not exist
 
-- [ ] **Step 3: Implement:**
+- [x] **Step 3: Implement:**
 
 ```php
 <?php
@@ -873,12 +960,12 @@ In `ConfigScan::processTarget()`, after `FindingWriter::upsert()` returns the id
 
 (add `RuleStore::allFor()` alongside `openFor()`, same query without the state filter)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php affected/`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Compliance/FindingAffected.php src/Compliance/RuleStore.php src/Compliance/ConfigScan.php
@@ -891,7 +978,7 @@ git commit -m "feat(sac): push per-rule results to riskregister affected areas w
 
 **Files:** Create `front/compliancedetail.php`, `templates/compliancedetail.html.twig`; modify `templates/compliance.html.twig`.
 
-- [ ] **Step 1:** The page's own guard is its test, as in Task 11 of the Tier 1 plan:
+- [x] **Step 1:** The page's own guard is its test, as in Task 11 of the Tier 1 plan:
   `db/menu-entry-shape` already asserts every linked page exists, and this page is
   linked from the dashboard rather than the menu, so add to `ConfigScan::selfChecks()`:
 
@@ -901,12 +988,12 @@ git commit -m "feat(sac): push per-rule results to riskregister affected areas w
 },
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `php plugins/sac/tools/selfcheck.php compliancedetail`
 Expected: FAIL — file does not exist
 
-- [ ] **Step 3: Implement** — `front/compliancedetail.php`:
+- [x] **Step 3: Implement** — `front/compliancedetail.php`:
 
 ```php
 <?php
@@ -951,13 +1038,13 @@ In `templates/compliance.html.twig`, make the fail count link to this page:
 (and pass `detail_url` from `front/compliance.php`, built with
 `Html::getPrefixedUrl('/plugins/sac/front/compliancedetail.php?computers_id=' . $cid)`)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `php plugins/sac/tools/selfcheck.php compliancedetail`
 Expected: PASS. Manual VM check (not scriptable): open the page for a host with
 rules, confirm the list renders and a resolved rule is visually distinct.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add front/compliancedetail.php templates/compliancedetail.html.twig templates/compliance.html.twig front/compliance.php
@@ -974,26 +1061,26 @@ These change **fresh installs only** — verified against core: `CronTask::regis
 returns early for an already-registered task, and `Config::setDefaults()` only
 writes missing keys. VM-HQ-GLPI was already changed through the UI.
 
-- [ ] **Step 1: Write the failing test** — add to `Config::selfChecks()`:
+- [x] **Step 1: Write the failing test** — add to `Config::selfChecks()`:
 
 ```php
 sac_assert_eq(self::DEFAULTS['compliance_stale_days'], 45, 'stale threshold matches the monthly cadence — at 14 a monthly scan would flag every host STALE permanently');
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php config/defaults-shape`
 Expected: FAIL — expected 45, got 14
 
-- [ ] **Step 3: Implement** — `Config::DEFAULTS`: `'compliance_stale_days' => 45`.
+- [x] **Step 3: Implement** — `Config::DEFAULTS`: `'compliance_stale_days' => 45`.
   `Cron::register()`: `ConfigScan` registers with `MONTH_TIMESTAMP`.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `"/c/php/php.exe" tools/offline-selfcheck.php config/`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/Config.php src/Cron.php
@@ -1011,7 +1098,7 @@ already parses the results file; extend it to also emit rule lines, and to resol
 references from `$CONTENT_FILE` (which lives on the host — this is why Design A
 can produce `framework_refs` at all).
 
-- [ ] **Step 1:** Extend the python3 block to collect failing rules:
+- [x] **Step 1:** Extend the python3 block to collect failing rules:
 
 ```python
 kept = {'fail', 'error'}
@@ -1028,13 +1115,42 @@ for rr in test_result.findall('xccdf:rule-result', ns):
     })
 ```
 
-- [ ] **Step 2:** Resolve each rule's title and CIS references from the content
+- [x] **Step 2:** Resolve each rule's title and CIS references from the content
   datastream, using the href substring Task 1 confirmed (`CIS_HREF` below is set
   from that recon, not guessed):
 
 ```python
 import re
-CIS_HREF = 'cisecurity.org'   # ← confirm/replace from Task 1 Step 3
+# Each <reference> is labelled from ITS OWN href, never from one per-host
+# prefix. Two reasons, both real: the fleet can mix SSG versions (one host on
+# v7 content, another on v8), and a single datastream can carry more than one
+# CIS reference set side by side. A global prefix would mislabel whichever
+# side it guessed wrong.
+#
+# Only entries CONFIRMED by recon on a real host belong in this table. An
+# unrecognised CIS href is skipped and reported, never labelled on a hunch:
+# a wrong control reference is worse than a missing one.
+CIS_HREFS = {
+    # href substring            -> riskregister framework shortname
+    'cisecurity.org/controls/': 'CISv7',
+    #   ^ confirmed on vm-dev-damara, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
+    #     bare integer codes, observed set 1-9,11-16,18-20. Codes reaching 20
+    #     is what identifies v7 (v8 has 18 controls).
+    # Add a v8 entry ONLY after running the Task 1 recon on a host that has it.
+}
+
+# Corroborating shape check. v7 cites whole controls ("19"); v8 cites dotted
+# safeguards ("4.1"). If a code's shape contradicts the label its href earned,
+# the table is out of date for that host - skip and report rather than emit a
+# confident wrong answer.
+def label_for(href, code):
+    for frag, short in CIS_HREFS.items():
+        if frag not in href:
+            continue
+        if short == 'CISv7' and '.' in code:
+            return None   # dotted code under the v7 href: content changed
+        return short
+    return None
 titles, refs = {}, {}
 content = ET.parse(content_path).getroot()
 for rule in content.iter():
@@ -1046,16 +1162,41 @@ for rule in content.iter():
     t = rule.find('xccdf:title', ns)
     if t is not None and t.text:
         titles[rid] = ' '.join(t.text.split())
-    codes = [
-        (r.text or '').strip()
-        for r in rule.findall('xccdf:reference', ns)
-        if CIS_HREF in (r.get('href') or '')
-    ]
-    if codes:
-        refs[rid] = ','.join('CISv8:' + c for c in codes if c)
+    labelled = []
+    for r in rule.findall('xccdf:reference', ns):
+        href = r.get('href') or ''
+        code = (r.text or '').strip()
+        if not code:
+            continue
+        # PCI DSS refs in this content carry NO href at all, so they fall out
+        # here without needing their own exclusion.
+        short = label_for(href, code)
+        if short is None:
+            if 'cisecurity.org' in href:
+                unknown_cis_hrefs[href] = unknown_cis_hrefs.get(href, 0) + 1
+            continue
+        labelled.append(short + ':' + code)
+    if labelled:
+        refs[rid] = ','.join(labelled)
 ```
 
-- [ ] **Step 3:** Emit one line per rule after the summary line:
+- [x] **Step 2b:** Report any CIS href the table does not know, instead of
+  dropping it silently. Initialise `unknown_cis_hrefs = {}` before the loop and
+  emit one line per unknown href after the rule lines:
+
+```python
+for href, n in sorted(unknown_cis_hrefs.items()):
+    print("SACNOTE1|unknown_cis_href|{}|{}".format(href, n))
+```
+
+  The PHP side records these through `Reconcile::note()`, the same path
+  `bad_summary` already uses, so an SSG version bump on any host surfaces in the
+  Reconcile tab as "this host has CIS references SAC does not recognise" rather
+  than as refs that quietly stop appearing. **This is what makes a mixed v7/v8
+  fleet safe:** a host whose content moved to v8 reports itself instead of being
+  mislabelled as v7.
+
+- [x] **Step 3:** Emit one line per rule after the summary line:
 
 ```python
 for r in rules:
@@ -1064,7 +1205,7 @@ for r in rules:
         r['id'], r['result'], r['severity'], refs.get(r['id'], ''), title))
 ```
 
-- [ ] **Step 4: Verify on a host**
+- [x] **Step 4: Verify on a host** — DONE 2026-10-25 on `vm-dev-damara` (OL 9.3) with 1.8.0-rc3: `Per-rule lines: 57`, matching `fail=57` in the summary, 58 lines total. rc1 produced the same 57 lines, so the rewritten memory-bounded parser is confirmed byte-equivalent on the real 16 MB datastream, not only on fixtures.
 
 ```bash
 sudo /usr/local/sbin/sac-oscap-summary.sh
@@ -1082,7 +1223,7 @@ sudo -u nginx ssh -i /etc/sac-collect/sac_collect_key \
 
 Expected: the whole multi-line payload, no `authorized_keys` change needed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/host-agent/sac-oscap-summary.sh
@@ -1095,11 +1236,11 @@ git commit -m "feat(sac): emit per-rule SCAP lines from the host wrapper"
 
 **Files:** Modify `setup.php`, `CHANGELOG.md`
 
-- [ ] **Step 1:** `PLUGIN_SAC_VERSION` → `1.8.0-rc1`; CHANGELOG heading `## [1.8.0-rc1] - <date>` with the Added/Changed entries.
-- [ ] **Step 2:** `"/c/php/php.exe" tools/offline-selfcheck.php` → all green.
-- [ ] **Step 3:** Commit, `git tag 1.8.0-rc1`, build `sacv1.8.0-rc1.zip` with
+- [x] **Step 1:** `PLUGIN_SAC_VERSION` → `1.8.0-rc1`; CHANGELOG heading `## [1.8.0-rc1] - <date>` with the Added/Changed entries.
+- [x] **Step 2:** `"/c/php/php.exe" tools/offline-selfcheck.php` → all green.
+- [x] **Step 3:** Commit, `git tag 1.8.0-rc1`, build `sacv1.8.0-rc1.zip` with
       `git archive --format=zip --prefix=sac/ -o sacv1.8.0-rc1.zip HEAD -- . ':!docs' ':!.gitattributes'`.
-- [ ] **Step 4:** Deploy note to the user: this release changes `.twig` files, so
+- [x] **Step 4:** Deploy note to the user: this release changes `.twig` files, so
       **`cache:clear` is required**; the host wrapper must be redeployed to every
       monitored host for rule lines to appear.
 - [ ] **Step 5:** Log to hub §7: version, what shipped, and the first real
@@ -1123,3 +1264,4 @@ git commit -m "feat(sac): emit per-rule SCAP lines from the host wrapper"
   rather than being removed (riskregister's note of 2026-10-15). Correct handling
   needs their explicit removal call; deferred until an SSG version bump actually
   orphans rules.
+

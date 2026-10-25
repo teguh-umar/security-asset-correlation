@@ -35,7 +35,7 @@
                     <td class="text-muted small">{{ r.benchmark_id }}</td>
                     <td data-sort="{{ r.score }}" class="{{ sc_class }}">{{ r.score }}%</td>
                     <td class="text-end">{{ r.pass_count }}</td>
-                    <td class="text-end">{{ r.fail_count }}</td>
+                    <td class="text-end"><a href="{{ r.detail_url }}" title="{{ __('Show the failing rules', 'sac') }}">{{ r.fail_count }}</a></td>
                     <td class="text-end">{{ r.other_count }}</td>
                     <td>
                         {{ r.date_collected ?: __('Never', 'sac') }}
