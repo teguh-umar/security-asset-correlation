@@ -360,8 +360,11 @@ RULES_RC=$?
 set -e
 
 if [ "$RULES_RC" -ne 0 ]; then
-    log "Per-rule parsing failed (rc=$RULES_RC) - writing the summary line alone, as the pre-1.8.0 wrapper did"
-    RULE_LINES=""
+    log "Per-rule parsing failed (rc=$RULES_RC) - writing the summary line plus a rule_parse_failed note, so SAC leaves the existing rules alone instead of resolving them"
+    # Say so in the payload, not only in a log nobody reads. Without this
+    # line SAC cannot tell 'parsing broke' from 'this host has nothing
+    # failing', and would resolve every open rule it holds for the host.
+    RULE_LINES="SACNOTE1|rule_parse_failed|$RULES_RC"
 else
     log "Per-rule lines: $(printf '%s' "$RULE_LINES" | grep -c '^SACRULE1|' || true)"
     NOTES=$(printf '%s' "$RULE_LINES" | grep -c '^SACNOTE1|' || true)
