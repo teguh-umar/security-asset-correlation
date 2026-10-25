@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0-rc3] - 2026-10-25
+
+rc2 was broken on arrival: the host wrapper shipped with Windows line endings
+and died at its shebang with `bash\r: No such file or directory`, before a
+single line of it ran. rc2 is superseded and should not be deployed.
+
+### Fixed
+
+- **The host wrapper ships with Unix line endings.** `.gitattributes` already
+  marked it `-text` so git would never rewrite it, which is right — but that
+  also means git faithfully stored the CRLF an editor on Windows had written,
+  and `git archive` put it straight into the zip.
+- **The offline suite now refuses a wrapper containing a carriage return**
+  (`hostagent/wrapper-has-unix-line-endings`), so this fails on the
+  workstation instead of on the host after an scp and an install. Verified by
+  re-introducing the CRLF: the check fails.
 ## [1.8.0-rc2] - 2026-10-25
 
 First run on a real host (`vm-dev-damara`, Oracle Linux 9.3) produced all 57
@@ -848,5 +864,6 @@ checklist.
 - `tools/selfcheck.php` (full VM self-check runner, bootstraps GLPI and runs
   every `GlpiPlugin\Sac\*::selfChecks()` including the `db/` fixtures) and
   `tools/offline-selfcheck.php` (dependency-free pure-logic subset).
+
 
 
