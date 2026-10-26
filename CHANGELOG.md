@@ -1,5 +1,89 @@
 # Changelog
 
+## [1.9.0-rc1] - 2026-10-26
+
+**Module 2 v2: a software classification replaces the publisher watch list as
+the licensing decision.** On `vm-dev-damara` the old publisher test produced
+**817** "unlicensed commercial software" Findings, every one of them an Oracle
+Linux distribution package whose vendor GLPI records as exactly `Oracle`; the
+number of genuine commercial Oracle products among them was **0**. A publisher
+is not a licensing decision — within one publisher, editions differ (MySQL
+Community is GPL, MySQL Commercial is a subscription; OpenJDK is free, Oracle
+JDK depends on the version). Module 2 now classifies software with per-entity
+rules, and anything a rule cannot decide goes to a review queue instead of
+being asserted as unlicensed.
+
+### Added
+
+- **Licence rules** (`License rules` page, `glpi_plugin_sac_licenserules`):
+  a pattern matched on software **name** or installed **version**, assigning
+  exactly `free` or `needs_license`, with a mandatory reason. Rules belong to an
+  entity and are inherited by its sub-entities; the nearer entity wins, then the
+  more specific pattern, then the lowest id. A version rule decides only when
+  **every** installed version matches — a partial match leaves the software
+  undecided rather than guessing. A duplicate `(entity, match_on, pattern)` is
+  refused. There is no delete: a rule is superseded, not removed, so history
+  stays readable.
+- **Licence review queue** (`License review` page,
+  `glpi_plugin_sac_licensereview`): software from a watched commercial publisher
+  that no rule decides. A row can be **flagged** with a note for a colleague and
+  **decided** later. A decision is saved immediately as an exact rule for that
+  software in that entity; the page then offers to generalise the exact rule
+  into a wider pattern and shows **every installed software the pattern would
+  cover** before it is replaced, counting but never naming rows outside the
+  approver's entities. A `decided` row is never reopened by a later scan.
+- **Seeded baseline rules** (`install/data/license_rules.csv`), entity 0 and
+  recursive, topped up on every install without overwriting an admin's edit:
+  RHEL 7/8/9/10 distribution packages in both the dotted (`.el<N>`) and modular
+  (`+el<N>`) version forms = free; `mysql-community-*` = free;
+  `mysql-commercial-*` = needs licence; `*-openjdk*` = free; Oracle Database
+  Enterprise/Standard Edition = needs licence. **Deliberately not seeded:**
+  Oracle JDK (licence depends on version) and Oracle Database XE (free — a
+  broad `Oracle Database*` rule would have charged for it). Both queue for a
+  human decision instead.
+- **`license_missing_severity`** (default `Medium`): the severity of a single
+  unlicensed-software Finding, replacing the old 2a volume thresholds.
+- **One Finding per software** (`SAC-LIC-SW-<software id>`), assignable and
+  closable on its own, linked to its Software item as well as its Computers.
+
+### Changed
+
+- **The publisher watch list now only gates queue entry, never the verdict.**
+  Software from a publisher not on the list stays invisible to Module 2 as
+  before; software on the list that no rule decides becomes a queue row, not a
+  Finding. A rule decides regardless of publisher.
+- **Findings are written only for `needs_license` software with no licence
+  row**, and are cleared when the software is licensed, leaves scope, or a rule
+  stops classifying it as needing a licence.
+- **The two `license_2a_*` thresholds are removed** from the Setup page and
+  their stored values are deleted on install: a volume threshold over a
+  publisher-wide Finding has no meaning when there is one Finding per software.
+- **Upgrade closes the old per-publisher Findings** (`SAC-LIC-MISSING-*`) with a
+  superseded note. Nothing is deleted and no status is changed; closing them
+  stays a human decision.
+
+### Fixed
+
+- **Distribution packages are no longer reported as unlicensed commercial
+  software.** The 817 false Findings on a single Oracle Linux host, and their
+  equivalents on every RHEL host, are gone: the distro pattern matches first.
+- **The modular version form is matched, not just the dotted one.** Eleven PHP
+  packages on `vm-dev-damara` are versioned `8.1.27-1.module+el9.3.0+90130+…`
+  — `+el9`, not `.el9`. A rule written only as `*.el9` leaves exactly those
+  behind with no clue why; the seed now carries both forms.
+
+### Notes for deployment
+
+- **`cache:clear` is required** — this release adds and changes `.twig` files,
+  and GLPI does not recompile them in production.
+- **Run `php bin/console plugin:install sac --force`** to create the two new
+  tables, seed the baseline rules, delete the removed settings' stored values
+  and retire the old per-publisher Findings.
+- **rc1 has not run against a database.** The offline suite covers the matching,
+  resolution, seed data and decision logic, but the migration, the seed writes,
+  the two new pages and the review/generalise flow are first exercised by that
+  install. Verify them on the VM before promoting a final 1.9.0.
+
 ## [1.8.0] - 2026-10-25
 
 **Module 3 Tier 2: per-rule SCAP results.** Tier 1 reported one score per host;

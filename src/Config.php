@@ -15,7 +15,15 @@ final class Config
      * instead, see the `compliance_ssh_*` keys below).
      * `Migration::install()` deletes any stored value.
      */
-    public const REMOVED = ['finding_entity', 'finding_recursive', 'compliance_collect_name'];
+    public const REMOVED = [
+        'finding_entity',
+        'finding_recursive',
+        'compliance_collect_name',
+        // Superseded by license_missing_severity when Module 2 moved from one
+        // Finding per publisher to one Finding per software.
+        'license_2a_products_threshold',
+        'license_2a_installs_threshold',
+    ];
 
     public const DEFAULTS = [
         'scan_entities'                => '[]',
@@ -31,8 +39,6 @@ final class Config
         'license_scan_enabled'         => 1,
         'license_check_overdeployment' => 0,
         'license_ignore_categories'    => '["system_component"]',
-        'license_2a_products_threshold'=> 5,
-        'license_2a_installs_threshold'=> 20,
         'license_missing_severity'     => 'Medium',
         'compliance_scan_enabled'      => 1,
         'compliance_ssh_key_path'      => '/etc/sac-collect/sac_collect_key',
@@ -73,8 +79,6 @@ final class Config
         'license_scan_enabled'         => 'bool',
         'license_check_overdeployment' => 'bool',
         'license_ignore_categories'    => 'softwarecategories',
-        'license_2a_products_threshold'=> 'int',
-        'license_2a_installs_threshold'=> 'int',
         'license_missing_severity'     => 'text',
         'compliance_scan_enabled'      => 'bool',
         'compliance_ssh_key_path'      => 'text',
@@ -215,21 +219,11 @@ final class Config
                 'fields' => [
                     'license_scan_enabled' => [
                         'label' => __('Scan software licences', 'sac'),
-                        'hint'  => __('Reports commercial software installed with no licence recorded.', 'sac'),
+                        'hint'  => __('Reports software a classification rule says needs a licence, installed with no licence recorded.', 'sac'),
                     ],
                     'license_check_overdeployment' => [
                         'label' => __('Also report over-deployment', 'sac'),
                         'hint'  => __('More installs than licensed seats.', 'sac'),
-                    ],
-                    'license_2a_products_threshold' => [
-                        'label' => __('Unlicensed software is Medium above', 'sac'),
-                        'hint'  => __('Per publisher and entity; otherwise Low.', 'sac'),
-                        'unit'  => __('products', 'sac'),
-                    ],
-                    'license_2a_installs_threshold' => [
-                        'label' => __('…or above', 'sac'),
-                        'hint'  => '',
-                        'unit'  => __('installs', 'sac'),
                     ],
                     'license_missing_severity' => [
                         'label' => __('Severity of a licence-required finding', 'sac'),
@@ -348,6 +342,12 @@ final class Config
         return [
             'config/defaults-shape' => static function (): void {
                 sac_assert_eq(array_intersect(self::REMOVED, array_keys(self::DEFAULTS)), [], 'no removed key is still a setting');
+                // The volume thresholds graded one publisher-wide Finding. There
+                // is one Finding per software now, so they no longer decide
+                // anything and must not stay on the Setup page pretending to.
+                sac_assert(!array_key_exists('license_2a_products_threshold', self::DEFAULTS), 'the publisher-aggregate product threshold is not a setting');
+                sac_assert(!array_key_exists('license_2a_installs_threshold', self::DEFAULTS), 'the publisher-aggregate install threshold is not a setting');
+                sac_assert_eq(self::DEFAULTS['license_missing_severity'], 'Medium', 'one unlicensed-software Finding is Medium by default');
                 sac_assert_eq(self::DEFAULTS['license_check_overdeployment'], 0, '2b off by default');
                 sac_assert_eq(self::DEFAULTS['compliance_stale_days'], 45, 'stale threshold matches the monthly cadence — at 14 a monthly scan of a monthly-refreshed file would flag every host STALE permanently');
                 $cats = json_decode(self::DEFAULTS['license_ignore_categories'], true);
