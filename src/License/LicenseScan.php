@@ -182,8 +182,11 @@ final class LicenseScan
         }
 
         // Clear every classification Finding this run no longer asserts: rule
-        // changed, licence added, or the software has no installs left in scope
-        // (including every host trashed, which still leaves it a candidate).
+        // changed, licence added, or the software has no installs left in scope.
+        // The plan is seeded from the Findings themselves, not from the
+        // candidate set, so a software the candidate query no longer returns
+        // (all hosts trashed) is still reached and cleared. A software whose
+        // processing threw is absent from the plan: its state is unknown.
         foreach (self::stalePlan($hadFinding, $asserted, $failed) as $sid => $keep) {
             FindingWriter::clearExcept(Code::licSoftware($sid), $keep, 'no longer classified as needing a licence, now licensed, or no longer installed in scope', $run, $scope);
         }
@@ -378,16 +381,59 @@ final class LicenseScan
     {
         global $DB;
 
-        $catFilter = '';
-        $safe      = [];
+        $quoted = [];
         foreach ($ignore as $c) {
             $c = (string) $c;
             if ($c !== '') {
-                $safe[] = $DB->quote($c);
+                $quoted[] = $DB->quote($c);
             }
         }
-        if ($safe !== []) {
-            $catFilter = 'AND (`cat`.`name` IS NULL OR `cat`.`name` NOT IN (' . implode(',', $safe) . '))';
+
+        $res = $DB->doQuery(self::candidateSql($quoted));
+        if (!$res) {
+            return;
+        }
+        $current = null;
+        while ($row = $res->fetch_assoc()) {
+            if ($current !== null && (int) $current['id'] !== (int) $row['id']) {
+                yield $current;
+                $current = null;
+            }
+            if ($current === null) {
+                $current = [
+                    'id'               => $row['id'],
+                    'name'             => $row['name'],
+                    'manufacturers_id' => $row['manufacturers_id'],
+                    'versions_by_entity' => [],
+                ];
+            }
+            $vn = (string) ($row['version_name'] ?? '');
+            // GLPI routinely yields blank versions; a blank would undecide a
+            // software whose every real version matched.
+            if ($vn !== '') {
+                $current['versions_by_entity'][(int) $row['entities_id']][$vn] = $vn;
+            }
+        }
+        if ($current !== null) {
+            yield $current;
+        }
+    }
+
+    /**
+     * The candidate SELECT. Every predicate here is a promise: removing one
+     * silently changes what "installed" means (and the clearing path with it),
+     * and adding a publisher predicate restores the 817-false-Finding bug.
+     *
+     * PURE (no $DB): $quotedIgnore holds SQL-quoted category names, so the
+     * shape of the query can be asserted offline.
+     *
+     * @param array<int,string> $quotedIgnore already-quoted category names
+     */
+    public static function candidateSql(array $quotedIgnore): string
+    {
+        $catFilter = '';
+        if ($quotedIgnore !== []) {
+            $catFilter = 'AND (`cat`.`name` IS NULL OR `cat`.`name` NOT IN (' . implode(',', $quotedIgnore) . '))';
         }
 
         // One row per (software, entity, distinct version name), folded back
@@ -418,34 +464,7 @@ final class LicenseScan
                   $catFilter
                 ORDER BY `sw`.`id`";
 
-        $res = $DB->doQuery($sql);
-        if (!$res) {
-            return;
-        }
-        $current = null;
-        while ($row = $res->fetch_assoc()) {
-            if ($current !== null && (int) $current['id'] !== (int) $row['id']) {
-                yield $current;
-                $current = null;
-            }
-            if ($current === null) {
-                $current = [
-                    'id'               => $row['id'],
-                    'name'             => $row['name'],
-                    'manufacturers_id' => $row['manufacturers_id'],
-                    'versions_by_entity' => [],
-                ];
-            }
-            $vn = (string) ($row['version_name'] ?? '');
-            // GLPI routinely yields blank versions; a blank would undecide a
-            // software whose every real version matched.
-            if ($vn !== '') {
-                $current['versions_by_entity'][(int) $row['entities_id']][$vn] = $vn;
-            }
-        }
-        if ($current !== null) {
-            yield $current;
-        }
+        return $sql;
     }
 
     /**
@@ -668,6 +687,24 @@ final class LicenseScan
                     sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [0], self::onWatchList($mid, $watch), false)['action'], 'finding', "manufacturers_id $mid still reaches classification and fires the rule");
                 }
             },
+            'license/candidate-query-never-filters-by-publisher' => static function (): void {
+                // The 817-false-Finding regression path is a publisher gate:
+                // either a `glpi_manufacturers` join in the candidate query or
+                // a `$mid > 0` skip in run(). The join is assertable offline;
+                // the skip is not (see db/lic-4 for the full path).
+                $publisherFilter = static function (string $sql): bool {
+                    return str_contains(strtolower($sql), 'glpi_manufacturers')
+                        || (bool) preg_match('/`?manufacturers_id`?\s*(?:=|\bIN\b|\bIS\b|>)/i', $sql);
+                };
+                $sql = self::candidateSql(["'system_component'"]);
+                sac_assert(str_contains($sql, "'system_component'"), 'an ignored category still reaches the query');
+                sac_assert(!$publisherFilter($sql), 'the candidate query joins no publisher table and filters on no manufacturers_id');
+                sac_assert(
+                    $publisherFilter($sql . " INNER JOIN `glpi_manufacturers` AS `m` ON `m`.`id` = `sw`.`manufacturers_id`"),
+                    'the probe itself catches a reintroduced publishers join - it is not vacuous'
+                );
+                sac_assert(str_contains($sql, 'glpi_computers'), 'and it still resolves installs through live computers');
+            },
             'license/stale-plan-clears-vanished-software' => static function (): void {
                 $had = [10 => true, 11 => true, 12 => true, 13 => true];
                 // 10: still asserted in entity 2; 11: reached but no longer asserted;
@@ -830,6 +867,38 @@ final class LicenseScan
                     sac_assert_eq(count($f->find(['code' => $code])), 0, 'LIC-3: ignored-category software produces no Finding');
                 } finally {
                     self::scTeardown($ids, [$code], $startId);
+                }
+            },
+
+            // LIC-4 — Review Focus 5 / the 817-false-Finding regression path.
+            // A blank (0) or dangling manufacturers_id must still reach
+            // classification through the REAL run() loop: the offline checks can
+            // prove the candidate SQL carries no publisher predicate, but only a
+            // full run() can prove no `$mid > 0` skip sits between the query and
+            // the rule. Both are the way back to the 817 false Findings.
+            'db/lic-4-missing-manufacturer-is-not-skipped' => static function (): void {
+                if (!FindingWriter::isAvailable()) { return; }
+                global $DB;
+                $f = new \GlpiPlugin\Riskregister\Finding();
+                // 0 = blank; 987654 = points at a row that does not exist.
+                foreach ([0, 987654] as $mid) {
+                    $ids     = self::scSeed(false);
+                    $code    = Code::licSoftware($ids['sid']);
+                    $startId = self::scRunFloor();
+                    try {
+                        $DB->update('glpi_softwares', ['manufacturers_id' => $mid], ['id' => $ids['sid']]);
+                        self::scRule();
+                        $run = RunLog::begin('license');
+                        self::run($run);
+                        $run->finish('ok');
+                        sac_assert_eq(
+                            count($f->find(['code' => $code])),
+                            1,
+                            "LIC-4: manufacturers_id $mid still produces a Finding (no publisher gate in run)"
+                        );
+                    } finally {
+                        self::scTeardown($ids, [$code], $startId);
+                    }
                 }
             },
         ];
