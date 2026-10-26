@@ -53,32 +53,33 @@ final class LicenseScan
         $toQueue = [];
         /** @var array<int,true> software that already has a SAC-LIC-SW Finding row somewhere */
         $hadFinding = self::softwareWithFinding();
-        /** @var array<int,true> software this run reached (so a stale Finding of an unreached one may be cleared) */
-        $touched = [];
+        /** @var array<int,array<int,int>> softwares_id => entities where this run asserted its Finding */
+        $asserted = [];
+        /** @var array<int,true> software whose processing threw: its Finding state is unknown, so never cleared */
+        $failed = [];
 
         foreach (self::candidateSoftware($ignore) as $sw) {
           try {
             $sid    = (int) $sw['id'];
             $swName = (string) ($sw['name'] ?? '');
             $mid    = (int) ($sw['manufacturers_id'] ?? 0);
-            $touched[$sid] = true;
 
             $groups = AssetResolver::groupByEntity(AssetResolver::computersForSoftware($sid), $scope);
             if ($groups === []) {
                 continue; // not installed anywhere in the scanned entities
             }
             $run->bump('scanned');
+            $asserted[$sid] = [];
 
             // Everything below is per entity of the installs: installs, seats
             // and the finding itself. A licence counts for an entity only when
             // GLPI would show it there (see licenseAggregate()).
             $overEntities = [];
-            $swEntities   = []; // entities where this run asserts the classification Finding
-            $byComputer   = (array) ($sw['versions_by_computer'] ?? []);
+            $byEntity     = (array) ($sw['versions_by_entity'] ?? []);
             // A manufacturers_id pointing at a deleted row is simply "not on the
             // watch list": the rule below still decides. No manufacturer lookup
             // gates classification.
-            $onWatchList  = $mid > 0 && in_array($mid, $commercial, true);
+            $onWatchList  = self::onWatchList($mid, $commercial);
             $anyLicense   = false;
             foreach ($groups as $entity => $hostsById) {
                 $installs   = count($hostsById);
@@ -92,7 +93,7 @@ final class LicenseScan
                 // --- 2a: the classification rule decides; the watch list only feeds the queue
                 // Version evidence is this entity's own installs only: a version
                 // installed solely in another entity must not undecide it here.
-                $versions = self::versionsForHosts($byComputer, array_keys($hostsById));
+                $versions = self::versionsForEntity($byEntity, (int) $entity);
                 $verdict = self::classify($swName, $versions, $rules, self::ancestry((int) $entity), $onWatchList, $hasLicense);
                 if ($verdict['action'] === 'finding') {
                     $rule  = (array) $verdict['rule'];
@@ -100,7 +101,7 @@ final class LicenseScan
                     $input = [
                         'entities_id'  => $entity,
                         'code'         => Code::licSoftware($sid),
-                        'name'         => substr("Unlicensed commercial software: $swName", 0, 255),
+                        'name'         => substr("Software needing a licence: $swName", 0, 255),
                         'scope_label'  => \GlpiPlugin\Sac\Text::clip("$swName — $installs install(s)"),
                         'severity'     => $missingSev,
                         'content'      => "Software: $swName\n"
@@ -124,7 +125,7 @@ final class LicenseScan
                         $run,
                         [['itemtype' => 'Software', 'items_id' => $sid]]
                     );
-                    $swEntities[] = (int) $entity;
+                    $asserted[$sid][] = (int) $entity;
                 } elseif ($verdict['action'] === 'queue') {
                     $toQueue[(int) $entity][] = $sid;
                 }
@@ -172,25 +173,19 @@ final class LicenseScan
             if ($checkOver && $anyLicense) {
                 FindingWriter::clearExcept(Code::licOver($sid), $overEntities, 'no longer over-deployed', $run, $scope);
             }
-
-            // A classification Finding this run no longer asserts (rule changed,
-            // licence added) gets its cleared note. Only software that has one.
-            if (isset($hadFinding[$sid])) {
-                FindingWriter::clearExcept(Code::licSoftware($sid), $swEntities, 'no longer classified as needing a licence, or now licensed', $run, $scope);
-            }
           } catch (\Throwable $e) {
             // One bad software row must not abort the whole scan.
             $run->bump('errors');
+            $failed[(int) ($sw['id'] ?? 0)] = true;
             \Toolbox::logInFile('sac', 'LicenseScan software ' . ($sw['id'] ?? '?') . ': ' . $e->getMessage() . "\n");
           }
         }
 
-        // Software that has a Finding but was not reached at all (uninstalled,
-        // moved into an ignored category): clear it everywhere in scope.
-        foreach (array_keys($hadFinding) as $sid) {
-            if (!isset($touched[$sid])) {
-                FindingWriter::clearExcept(Code::licSoftware((int) $sid), [], 'software no longer installed or in scope', $run, $scope);
-            }
+        // Clear every classification Finding this run no longer asserts: rule
+        // changed, licence added, or the software has no installs left in scope
+        // (including every host trashed, which still leaves it a candidate).
+        foreach (self::stalePlan($hadFinding, $asserted, $failed) as $sid => $keep) {
+            FindingWriter::clearExcept(Code::licSoftware($sid), $keep, 'no longer classified as needing a licence, now licensed, or no longer installed in scope', $run, $scope);
         }
 
         foreach ($toQueue as $entity => $softwareIds) {
@@ -264,21 +259,44 @@ final class LicenseScan
     }
 
     /**
-     * PURE. Distinct installed version names for the given computers.
+     * PURE. Installed version names of one entity (already distinct and non-blank).
      *
-     * @param array<int,array<int,string>> $byComputer computers_id => version names
-     * @param array<int,int|string>        $computerIds
+     * @param array<int,array<int,string>> $byEntity entities_id => version names
      * @return string[]
      */
-    public static function versionsForHosts(array $byComputer, array $computerIds): array
+    public static function versionsForEntity(array $byEntity, int $entity): array
     {
-        $out = [];
-        foreach ($computerIds as $cid) {
-            foreach ($byComputer[(int) $cid] ?? [] as $name) {
-                $out[(string) $name] = (string) $name;
+        return array_values($byEntity[$entity] ?? []);
+    }
+
+    /** PURE. Whether a software's publisher is on the watch list. 0 and dangling ids are never on it. */
+    public static function onWatchList(int $manufacturersId, array $watch): bool
+    {
+        return $manufacturersId > 0 && in_array($manufacturersId, $watch, true);
+    }
+
+    /**
+     * PURE. Which existing SAC-LIC-SW Findings to clear, and the entities to keep.
+     * Every software that has a Finding is cleared except in the entities where
+     * this run asserted it; a software this run never reached (uninstalled,
+     * all hosts trashed, ignored category) keeps nothing. A software whose
+     * processing failed is left alone: its state is unknown.
+     *
+     * @param array<int,true>           $hadFinding softwares_id => true
+     * @param array<int,array<int,int>> $asserted   softwares_id => entities asserted this run
+     * @param array<int,true>           $failed
+     * @return array<int,array<int,int>> softwares_id => entities to keep
+     */
+    public static function stalePlan(array $hadFinding, array $asserted, array $failed): array
+    {
+        $plan = [];
+        foreach (array_keys($hadFinding) as $sid) {
+            if (isset($failed[$sid])) {
+                continue;
             }
+            $plan[(int) $sid] = $asserted[$sid] ?? [];
         }
-        return array_values($out);
+        return $plan;
     }
 
     /**
@@ -354,7 +372,7 @@ final class LicenseScan
      * ignore rule still matches (I14).
      *
      * @param array<int,string> $ignore
-     * @return iterable<array{id:int|string,name:?string,manufacturers_id:int|string,versions_by_computer:array<int,array<int,string>>}>
+     * @return iterable<array{id:int|string,name:?string,manufacturers_id:int|string,versions_by_entity:array<int,array<int,string>>}>
      */
     private static function candidateSoftware(array $ignore): iterable
     {
@@ -372,8 +390,10 @@ final class LicenseScan
             $catFilter = 'AND (`cat`.`name` IS NULL OR `cat`.`name` NOT IN (' . implode(',', $safe) . '))';
         }
 
-        // One row per (software, installed version name), folded back into one
-        // software with a per-computer version map below. Not GROUP_CONCAT: its 1024-byte
+        // One row per (software, entity, distinct version name), folded back
+        // into one software with a per-entity version map below. Computers are
+        // joined (not deleted, not template) so "installed" means exactly what
+        // AssetResolver::computersForSoftware() means. Not GROUP_CONCAT: its 1024-byte
         // default would silently truncate a long version list, and the matcher
         // needs every installed version. The INNER JOINs keep the old "has a
         // referenced version on a Computer" rule. There is deliberately no
@@ -381,7 +401,7 @@ final class LicenseScan
         // the software.
         $sql = "SELECT DISTINCT `sw`.`id` AS `id`, `sw`.`name` AS `name`,
                        `sw`.`manufacturers_id` AS `manufacturers_id`,
-                       `sv`.`name` AS `version_name`, `isv`.`items_id` AS `computers_id`
+                       `sv`.`name` AS `version_name`, `c`.`entities_id` AS `entities_id`
                 FROM `glpi_softwares` AS `sw`
                 LEFT JOIN `glpi_softwarecategories` AS `cat` ON `cat`.`id` = `sw`.`softwarecategories_id`
                 INNER JOIN `glpi_softwareversions` AS `sv` ON `sv`.`softwares_id` = `sw`.`id`
@@ -389,6 +409,10 @@ final class LicenseScan
                         ON `isv`.`softwareversions_id` = `sv`.`id`
                        AND `isv`.`itemtype` = 'Computer'
                        AND `isv`.`is_deleted` = 0
+                INNER JOIN `glpi_computers` AS `c`
+                        ON `c`.`id` = `isv`.`items_id`
+                       AND `c`.`is_deleted` = 0
+                       AND `c`.`is_template` = 0
                 WHERE `sw`.`is_deleted` = 0
                   AND `sw`.`is_template` = 0
                   $catFilter
@@ -409,10 +433,15 @@ final class LicenseScan
                     'id'               => $row['id'],
                     'name'             => $row['name'],
                     'manufacturers_id' => $row['manufacturers_id'],
-                    'versions_by_computer' => [],
+                    'versions_by_entity' => [],
                 ];
             }
-            $current['versions_by_computer'][(int) $row['computers_id']][] = (string) ($row['version_name'] ?? '');
+            $vn = (string) ($row['version_name'] ?? '');
+            // GLPI routinely yields blank versions; a blank would undecide a
+            // software whose every real version matched.
+            if ($vn !== '') {
+                $current['versions_by_entity'][(int) $row['entities_id']][$vn] = $vn;
+            }
         }
         if ($current !== null) {
             yield $current;
@@ -620,7 +649,6 @@ final class LicenseScan
             'license/unmatched-goes-to-queue-not-finding' => static function (): void {
                 $c = self::classify('mystery-app', ['1.0'], [], [0], true, false);
                 sac_assert_eq($c['action'], 'queue', 'watch-list publisher, no rule: review queue');
-                sac_assert(!in_array($c['action'], ['finding'], true), 'and never a Finding input');
                 sac_assert_eq(self::classify('mystery-app', ['1.0'], [], [0], false, false)['action'], 'none', 'publisher not on the list, no rule: nothing (accepted blind spot)');
             },
             'license/free-rule-raises-nothing' => static function () use ($free): void {
@@ -631,11 +659,22 @@ final class LicenseScan
                 sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [0], false, true)['action'], 'none', 'a licence row for the entity settles it');
             },
             'license/missing-manufacturer-row-is-not-skipped' => static function () use ($needs): void {
-                // manufacturers_id 987654 points at a deleted row: it is simply not on the watch list.
-                $watch = [5, 6];
-                $onList = in_array(987654, $watch, true);
-                sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [0], $onList, false)['action'], 'finding', 'a dangling manufacturers_id still reaches classification');
-                sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [0], in_array(0, $watch, true), false)['action'], 'finding', 'so does manufacturers_id 0');
+                // manufacturers_id 987654 points at a deleted row; 0 is blank.
+                $watch = [5, 6, 0];
+                sac_assert_eq(self::onWatchList(987654, $watch), false, 'a dangling id is not on the watch list');
+                sac_assert_eq(self::onWatchList(0, $watch), false, 'a blank id is never on the watch list');
+                sac_assert_eq(self::onWatchList(5, $watch), true, 'a listed publisher is');
+                foreach ([987654, 0] as $mid) {
+                    sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [0], self::onWatchList($mid, $watch), false)['action'], 'finding', "manufacturers_id $mid still reaches classification and fires the rule");
+                }
+            },
+            'license/stale-plan-clears-vanished-software' => static function (): void {
+                $had = [10 => true, 11 => true, 12 => true, 13 => true];
+                // 10: still asserted in entity 2; 11: reached but no longer asserted;
+                // 12: never reached (all hosts trashed); 13: processing failed.
+                $plan = self::stalePlan($had, [10 => [2], 11 => []], [13 => true]);
+                sac_assert_eq($plan, [10 => [2], 11 => [], 12 => []], 'unreached software keeps nothing; failed software is left alone');
+                sac_assert_eq(self::stalePlan([], [5 => [1]], []), [], 'software without a Finding is never cleared');
             },
             'license/rule-recursion-respected' => static function () use ($needs): void {
                 $local = $needs;
@@ -657,9 +696,10 @@ final class LicenseScan
                 }
             },
             'license/versions-are-per-entity' => static function (): void {
-                $by = [1 => ['1.0'], 2 => ['1.0'], 3 => ['9.9-el9']];
-                sac_assert_eq(self::versionsForHosts($by, [1, 2]), ['1.0'], 'entity A sees only its own versions, deduplicated');
-                sac_assert_eq(self::versionsForHosts($by, [3]), ['9.9-el9'], 'entity B');
+                $by = [1 => ['1.0'], 2 => ['9.9-el9']];
+                sac_assert_eq(self::versionsForEntity($by, 1), ['1.0'], 'entity 1 sees only its own versions');
+                sac_assert_eq(self::versionsForEntity($by, 2), ['9.9-el9'], 'entity 2');
+                sac_assert_eq(self::versionsForEntity($by, 3), [], 'an entity with none');
             },
             'license/severity-fallback' => static function (): void {
                 sac_assert_eq(self::licenseSeverity('High'), 'High', 'a valid severity is kept');
