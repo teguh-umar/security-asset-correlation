@@ -186,6 +186,27 @@ These are the user's, recorded as they were made:
 - **Finding volume rises.** Three unlicensed Oracle products used to be one
   Finding; now they are three. This is the user's choice, made for assignability.
 
+## Input received after this document was handed over
+
+From the suite orchestrator, 2026-10-26, offered as input to the plan rather
+than as decisions. Recorded here so the plan does not have to rediscover them;
+the user has not ruled on either.
+
+- **On the two axes: the nearer entity wins first, then the more specific
+  pattern.** The reasoning is that a local rule is a deliberate override of an
+  inherited default, so an inherited broad rule beating a local exact one would
+  surprise whoever wrote the local one. The orchestrator also suggests putting
+  the chosen order **and a worked example on the Setup page itself**, since other
+  teams maintain the table — which serves goal 3 directly.
+- **On retiring `SAC-LIC-MISSING-*`: close them through `FindingWriter` with a
+  cleared note, never delete.** A human may have promoted one to a Risk or linked
+  controls to it, and riskregister keeps that history; deleting would destroy it.
+  **The step must be idempotent and safe to re-run**, because `plugin:install
+  --force` is the supported upgrade path and the install function therefore runs
+  on every upgrade — an unguarded retirement would re-run on each release. Guard
+  it with a marker in the plugin's config, read before and written after, so a
+  failed run retries. Count what it closed in the run log.
+
 ## Left to the builder
 
 - **Rule shape and matching.** Whether a rule is a glob, a prefix, or a small
