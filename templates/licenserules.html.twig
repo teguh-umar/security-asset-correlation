@@ -1,0 +1,156 @@
+{#
+ # SAC — licence classification rules, one row per (entity, match type, pattern).
+ # Autoescape ON — no |raw on plugin data. CSRF token field on the form.
+ # `action` = front/licenserules.php prefixed URL.
+ # `groups` = [{entity_id, name, rules: [{id, pattern, match_on,
+ #             classification, reason, is_recursive, can_edit}]}]
+ # `entities` = [{id, name}] entities the current user may write in.
+ # `form` = the add/edit form values; `form.id > 0` means editing.
+ # `error` = a validation or refusal message, or null.
+ # `can_act` = may add/edit (UPDATE on plugin_sac_finding).
+ # `sees_all` = the list is not filtered by entity.
+ #}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">{{ __('License classification rules', 'sac') }}</span>
+    </div>
+    <div class="card-body">
+        {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        <div class="alert alert-info">
+            <p class="mb-1"><strong>{{ __('How SAC chooses a rule', 'sac') }}</strong></p>
+            <ol class="mb-2">
+                <li>{{ __('SAC reads the rule from the entity the software belongs to first, then from that entity\'s parent, then further up.', 'sac') }}</li>
+                <li>{{ __('The nearest entity with a matching rule wins, even when its pattern is broader than a rule higher up.', 'sac') }}</li>
+                <li>{{ __('Within one entity the more specific pattern wins: a literal character beats a wildcard, and a longer prefix beats a shorter one. Two equally specific rules are settled by the lower rule id.', 'sac') }}</li>
+                <li>{{ __('A parent rule reaches a child entity only when "Applies to sub-entities" is ticked.', 'sac') }}</li>
+            </ol>
+            <p class="mb-1">
+                <strong>{{ __('Worked example', 'sac') }}</strong> —
+                <code>acme-db</code> {{ __('is installed in Team A, a child of the Root entity.', 'sac') }}
+            </p>
+            <ul class="mb-0">
+                <li>{{ __('Root has', 'sac') }} <code>acme-db</code> = {{ __('Needs a license', 'sac') }}, {{ __('with "Applies to sub-entities" ticked.', 'sac') }}</li>
+                <li>{{ __('Team A has', 'sac') }} <code>acme-*</code> = {{ __('Free', 'sac') }}</li>
+                <li>{{ __('Both rules match. Team A is nearer, so SAC classifies', 'sac') }} <code>acme-db</code> {{ __('as Free. If Team A had no rule, the Root rule would classify it as Needs a license.', 'sac') }}</li>
+            </ul>
+        </div>
+
+        {% if not sees_all %}
+            <div class="alert alert-secondary">
+                {{ __('Showing rules for the entities you can see, plus inherited rules from their parents that apply to sub-entities.', 'sac') }}
+            </div>
+        {% endif %}
+
+        {% if can_act %}
+            <h3 class="card-title mt-3">{{ form.id > 0 ? __('Edit rule', 'sac') : __('Add a rule', 'sac') }}</h3>
+            <form method="post" action="{{ action }}" class="mb-4">
+                <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                {% if form.id > 0 %}
+                    <input type="hidden" name="id" value="{{ form.id }}">
+                {% endif %}
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label" for="sac-rule-entity">{{ __('Entity', 'sac') }}</label>
+                        <select class="form-select" id="sac-rule-entity" name="entities_id" required>
+                            {% for entity in entities %}
+                                <option value="{{ entity.id }}" {{ form.entities_id == entity.id ? 'selected' : '' }}>{{ entity.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="sac-rule-pattern">{{ __('Pattern', 'sac') }}</label>
+                        <input type="text" class="form-control" id="sac-rule-pattern" name="pattern"
+                               value="{{ form.pattern }}" maxlength="255" placeholder="acme-*" required>
+                        <div class="form-text">{{ __('Glob: * is the only wildcard.', 'sac') }}</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="sac-rule-match-on">{{ __('Match on', 'sac') }}</label>
+                        <select class="form-select" id="sac-rule-match-on" name="match_on">
+                            <option value="name" {{ form.match_on == 'name' ? 'selected' : '' }}>{{ __('Software name', 'sac') }}</option>
+                            <option value="version" {{ form.match_on == 'version' ? 'selected' : '' }}>{{ __('Installed version', 'sac') }}</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label" for="sac-rule-classification">{{ __('Classification', 'sac') }}</label>
+                        <select class="form-select" id="sac-rule-classification" name="classification">
+                            <option value="free" {{ form.classification == 'free' ? 'selected' : '' }}>{{ __('Free', 'sac') }}</option>
+                            <option value="needs_license" {{ form.classification == 'needs_license' ? 'selected' : '' }}>{{ __('Needs a license', 'sac') }}</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_recursive" value="1"
+                                   id="sac-rule-recursive" {{ form.is_recursive ? 'checked' : '' }}>
+                            <label class="form-check-label" for="sac-rule-recursive">{{ __('Applies to sub-entities', 'sac') }}</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="sac-rule-reason">{{ __('Reason', 'sac') }}</label>
+                        <textarea class="form-control" id="sac-rule-reason" name="reason" rows="2" required>{{ form.reason }}</textarea>
+                        <div class="form-text">{{ __('Mandatory. Another team maintains this table, so the reason is what they read.', 'sac') }}</div>
+                    </div>
+                    <div class="col-12 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary" name="save" value="1">
+                            {{ form.id > 0 ? __('Save changes', 'sac') : __('Add rule', 'sac') }}
+                        </button>
+                        {% if form.id > 0 %}
+                            <a class="btn btn-outline-secondary" href="{{ action }}">{{ __('Cancel', 'sac') }}</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </form>
+        {% endif %}
+
+        {% if groups is empty %}
+            <div class="text-center text-muted">{{ __('No license rules yet', 'sac') }}</div>
+        {% else %}
+            {% for group in groups %}
+                <h4 class="mt-4">{{ group.name }}</h4>
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th data-sortable>{{ __('Pattern', 'sac') }}</th>
+                            <th data-sortable>{{ __('Match on', 'sac') }}</th>
+                            <th data-sortable>{{ __('Classification', 'sac') }}</th>
+                            <th data-sortable>{{ __('Reason', 'sac') }}</th>
+                            <th data-sortable>{{ __('Sub-entities', 'sac') }}</th>
+                            {% if can_act %}
+                                <th>{{ __('Actions', 'sac') }}</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in group.rules %}
+                        <tr>
+                            <td><code>{{ row.pattern }}</code></td>
+                            <td>{{ row.match_on == 'version' ? __('Installed version', 'sac') : __('Software name', 'sac') }}</td>
+                            <td>
+                                {% if row.classification == 'free' %}
+                                    <span class="badge bg-success text-white">{{ __('Free', 'sac') }}</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">{{ __('Needs a license', 'sac') }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ row.reason ?: '—' }}</td>
+                            <td>{{ row.is_recursive ? __('Yes', 'sac') : __('No', 'sac') }}</td>
+                            {% if can_act %}
+                                <td>
+                                    {% if row.can_edit %}
+                                        <a class="btn btn-sm btn-outline-secondary" href="{{ action }}?edit={{ row.id }}">{{ __('Edit', 'sac') }}</a>
+                                    {% else %}
+                                        <span class="text-muted">{{ __('Inherited', 'sac') }}</span>
+                                    {% endif %}
+                                </td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% endfor %}
+            {% include '@sac/_sortable-table.html.twig' %}
+        {% endif %}
+    </div>
+</div>
