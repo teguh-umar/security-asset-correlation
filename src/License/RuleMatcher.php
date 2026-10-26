@@ -32,6 +32,13 @@ final class RuleMatcher
                 $freeVer = ['id' => 5, 'entities_id' => 0, 'pattern' => '*el9*', 'match_on' => 'version', 'classification' => 'free'];
                 sac_assert(RuleMatcher::decide('php', ['8.1.27-1.module+el9.3.0', '8.2.0-upstream'], [$freeVer], [0]) === null, 'one unmatched installed version leaves the software undecided, never free');
             },
+            'license/matcher-partial-version-match-undecides' => static function (): void {
+                // A partial version match is evidence the rule is about this software;
+                // falling through to a looser name rule would be a confident wrong answer.
+                $phpFree = ['id' => 6, 'entities_id' => 0, 'pattern' => 'php*', 'match_on' => 'name', 'classification' => 'free'];
+                $elNeeds = ['id' => 7, 'entities_id' => 0, 'pattern' => '*el9*', 'match_on' => 'version', 'classification' => 'needs_license'];
+                sac_assert(RuleMatcher::decide('php', ['8.1.27-1.module+el9.3.0', '8.2.0-upstream'], [$phpFree, $elNeeds], [0]) === null, 'a partial version match leaves the software undecided even though a free name rule matches it');
+            },
         ];
     }
 
@@ -44,6 +51,12 @@ final class RuleMatcher
      * `$entityAncestry` lists the software's entity first, then its ancestors,
      * nearest first. Among candidates: nearer entity, then higher specificity,
      * then lower id.
+     *
+     * A `version` rule that matches some but not all installed versions leaves
+     * the software undecided: no rule of any kind may decide it. The partial
+     * match says the rule is about this software without covering all of it,
+     * which is the "unknown" state, not a reason to fall through to a looser rule.
+     * A `version` rule that matches none is irrelevant and is skipped.
      *
      * @param string[]                       $versionNames   every installed version of the software
      * @param array<int,array<string,mixed>> $rules          licenserules rows
@@ -62,6 +75,9 @@ final class RuleMatcher
             $entityId = (int) $rule['entities_id'];
             if (!isset($distance[$entityId])) {
                 continue; // a rule from an entity the software does not sit under
+            }
+            if (self::isPartialVersionMatch($rule, $versionNames)) {
+                return null; // a partial version match undecides the software outright
             }
             $matchedOn = self::matchedOn($rule, $softwareName, $versionNames);
             if ($matchedOn === null) {
@@ -87,6 +103,29 @@ final class RuleMatcher
         $best['rule']['matched_on'] = $best['matched_on'];
 
         return $best['rule'];
+    }
+
+    /**
+     * PURE. True when a `version` rule matches at least one installed version
+     * but not all of them. A rule that matches none is not partial.
+     *
+     * @param array<string,mixed> $rule
+     * @param string[]            $versionNames
+     */
+    private static function isPartialVersionMatch(array $rule, array $versionNames): bool
+    {
+        if ($rule['match_on'] !== 'version' || $versionNames === []) {
+            return false;
+        }
+
+        $hits = 0;
+        foreach ($versionNames as $version) {
+            if (LicenseRule::matchesPattern((string) $rule['pattern'], $version)) {
+                $hits++;
+            }
+        }
+
+        return $hits > 0 && $hits < count($versionNames);
     }
 
     /**
