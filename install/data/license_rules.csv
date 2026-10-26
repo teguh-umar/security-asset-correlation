@@ -1,0 +1,14 @@
+match_on,pattern,classification,reason
+version,*.el7,free,Distro release package (.el7): supplied by the distribution and covered by its subscription
+version,*el7*,free,Distro modular package (+el7 form): supplied by the distribution
+version,*.el8,free,Distro release package (.el8): supplied by the distribution and covered by its subscription
+version,*el8*,free,Distro modular package (+el8 form): supplied by the distribution
+version,*.el9,free,Distro release package (.el9): supplied by the distribution and covered by its subscription
+version,*el9*,free,Distro modular package (+el9 form): supplied by the distribution
+version,*.el10,free,Distro release package (.el10): supplied by the distribution and covered by its subscription
+version,*el10*,free,Distro modular package (+el10 form): supplied by the distribution
+name,mysql-community-*,free,MySQL Community Edition is GPL: no licence purchase
+name,mysql-commercial-*,needs_license,MySQL Commercial Edition is a paid Oracle product
+name,*-openjdk*,free,OpenJDK builds are GPL with the Classpath exception: no licence purchase
+name,Oracle Database*Enterprise Edition*,needs_license,Oracle Database Enterprise Edition is a paid product
+name,Oracle Database*Standard Edition*,needs_license,Oracle Database Standard Edition is a paid product

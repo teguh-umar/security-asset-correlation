@@ -5,9 +5,11 @@ namespace GlpiPlugin\Sac\License;
 /**
  * One per-entity licence classification rule (`glpi_plugin_sac_licenserules`).
  *
- * PURE: no `$DB`, no GLPI runtime. {@see validate()} is the only gate between a
- * malformed rule and the table — the database does not enforce a non-empty
- * `reason` or the `free`/`needs_license` value domain.
+ * The matching half ({@see validate()}, {@see specificity()},
+ * {@see matchesPattern()}) is PURE: no `$DB`, no GLPI runtime, and
+ * {@see validate()} is the only gate between a malformed rule and the table.
+ * {@see seedFromCsv()} is the one method that writes, and it runs at install
+ * time only.
  */
 final class LicenseRule
 {
@@ -36,7 +38,62 @@ final class LicenseRule
                 sac_assert(LicenseRule::matchesPattern('*a*a*a*a*', str_repeat('a', 5000) . 'b'), 'a run of stars collapses; a long subject still matches');
                 sac_assert(!LicenseRule::matchesPattern('*a*a*a*a*b', str_repeat('a', 5000)), 'a long non-matching subject returns false promptly');
             },
+
+            'license/seed-covers-both-distro-forms' => static function (): void {
+                $rules = self::seedRulesForCheck();
+
+                sac_assert(in_array('*.el9', array_column($rules, 'pattern'), true), 'the dotted form is seeded explicitly');
+                sac_assert(in_array('*el9*', array_column($rules, 'pattern'), true), 'the modular form is seeded explicitly');
+
+                $dotted = RuleMatcher::decide('openssl', ['3.0.7-28.el9'], $rules, [0]);
+                sac_assert_eq($dotted['classification'] ?? null, 'free', 'a dotted el9 version is classified free');
+
+                $modular = RuleMatcher::decide('php', ['8.1.27-1.module+el9.3.0+90130+7e4e1ce0'], $rules, [0]);
+                sac_assert_eq($modular['classification'] ?? null, 'free', 'the modular +el9 form is classified free: the case a naive pattern misses');
+            },
+
+            'license/seed-leaves-uncertain-software-undecided' => static function (): void {
+                $rules = self::seedRulesForCheck();
+
+                $verdict = static function (string $name) use ($rules): ?string {
+                    $row = RuleMatcher::decide($name, ['1.0'], $rules, [0]);
+                    return $row === null ? null : (string) $row['classification'];
+                };
+
+                sac_assert_eq($verdict('mysql-community-server'), 'free', 'MySQL Community is free (same publisher, opposite answer)');
+                sac_assert_eq($verdict('mysql-commercial-server'), 'needs_license', 'MySQL Commercial needs a licence');
+                sac_assert_eq($verdict('java-17-openjdk'), 'free', 'OpenJDK builds are free');
+                sac_assert_eq($verdict('Oracle Database 19c Enterprise Edition'), 'needs_license', 'Oracle Database Enterprise Edition needs a licence');
+                sac_assert_eq($verdict('Oracle Database 21c Standard Edition'), 'needs_license', 'Oracle Database Standard Edition needs a licence');
+
+                // Deliberately not seeded: both depend on facts a glob cannot know.
+                sac_assert_eq($verdict('jdk-17.0.9'), null, 'Oracle JDK is left to the admin: its licence depends on the version');
+                sac_assert_eq($verdict('Oracle Database 21c Express Edition'), null, 'Oracle Database XE is not seeded: a broad Oracle Database* rule would wrongly charge for it');
+            },
         ];
+    }
+
+    /**
+     * PURE. The shipped seed rows, turned into rule rows exactly as
+     * {@see seedFromCsv()} writes them (entity 0, recursive). Used by the
+     * offline checks so the seed DATA is testable without a database.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private static function seedRulesForCheck(): array
+    {
+        $rows  = self::seedRows();
+        sac_assert($rows !== [], 'the shipped seed file has at least one row');
+
+        $rules = [];
+        $id    = 0;
+        foreach ($rows as $row) {
+            $error = self::validate($row);
+            sac_assert_eq($error, null, 'every seed row is a valid rule (' . (string) ($row['pattern'] ?? '?') . ')');
+            $rules[] = $row + ['id' => ++$id, 'entities_id' => 0, 'is_recursive' => 1];
+        }
+
+        return $rules;
     }
 
     /** Classes a rule may assign. There is no third class. */
@@ -47,6 +104,114 @@ final class LicenseRule
 
     /** `glpi_plugin_sac_licenserules.pattern` is varchar(255). */
     private const PATTERN_MAX = 255;
+
+    /** The table {@see seedFromCsv()} writes to. */
+    private const TABLE = 'glpi_plugin_sac_licenserules';
+
+    /** Columns of `install/data/license_rules.csv`, in order. */
+    private const SEED_COLUMNS = ['match_on', 'pattern', 'classification', 'reason'];
+
+    /** @var array<int,array{match_on:string,pattern:string,classification:string,reason:string}>|null */
+    private static ?array $seedRows = null;
+
+    /**
+     * The shipped seed rows, in file order. Never written; re-parsed once per
+     * request. A malformed row is skipped here, and the offline checks catch a
+     * missing named pattern.
+     *
+     * @return array<int,array{match_on:string,pattern:string,classification:string,reason:string}>
+     */
+    public static function seedRows(): array
+    {
+        if (self::$seedRows !== null) {
+            return self::$seedRows;
+        }
+        self::$seedRows = [];
+
+        $path = dirname(__DIR__, 2) . '/install/data/license_rules.csv';
+        if (!is_file($path)) {
+            return self::$seedRows;
+        }
+
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            return self::$seedRows;
+        }
+
+        $header = fgetcsv($fh, 0, ',', '"', '\\');
+        $header = $header === false
+            ? []
+            : array_map(static fn ($h): string => strtolower(trim((string) $h)), $header);
+        if ($header !== self::SEED_COLUMNS) {
+            fclose($fh);
+            return self::$seedRows;
+        }
+
+        while (($line = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
+            if ($line === [null] || count($line) !== 4) {
+                continue; // blank or malformed line
+            }
+            self::$seedRows[] = [
+                'match_on'       => trim((string) $line[0]),
+                'pattern'        => trim((string) $line[1]),
+                'classification' => trim((string) $line[2]),
+                'reason'         => trim((string) $line[3]),
+            ];
+        }
+        fclose($fh);
+
+        return self::$seedRows;
+    }
+
+    /**
+     * Top up the baseline rules from the shipped CSV. Called on every install /
+     * upgrade, so it must be idempotent:
+     *  - only entity 0 is seeded, and `is_recursive = 1` so the baseline reaches
+     *    every sub-entity (a non-recursive root rule would decide only software
+     *    that sits in the root entity itself);
+     *  - an existing `(entities_id, match_on, pattern)` row is left untouched,
+     *    so an admin's edit is never overwritten;
+     *  - a row that fails {@see validate()} is logged and skipped, not written.
+     */
+    public static function seedFromCsv(): void
+    {
+        /** @var \DBmysql $DB */
+        global $DB;
+
+        $now = $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s');
+
+        foreach (self::seedRows() as $row) {
+            $error = self::validate($row);
+            if ($error !== null) {
+                \Toolbox::logInFile('sac', 'license seed skipped (' . $row['pattern'] . '): ' . $error . "\n");
+                continue;
+            }
+
+            $exists = (int) ($DB->request([
+                'COUNT' => 'cpt',
+                'FROM'  => self::TABLE,
+                'WHERE' => [
+                    'entities_id' => 0,
+                    'match_on'    => $row['match_on'],
+                    'pattern'     => $row['pattern'],
+                ],
+            ])->current()['cpt'] ?? 0);
+            if ($exists > 0) {
+                continue;
+            }
+
+            $DB->insert(self::TABLE, [
+                'entities_id'    => 0,
+                'is_recursive'   => 1,
+                'pattern'        => $row['pattern'],
+                'match_on'       => $row['match_on'],
+                'classification' => $row['classification'],
+                'reason'         => $row['reason'],
+                'date_creation'  => $now,
+                'date_mod'       => $now,
+            ]);
+        }
+    }
 
     /**
      * PURE. Returns an error message, or null when the rule may be written.

@@ -1,5 +1,6 @@
 <?php
 
+use GlpiPlugin\Sac\License\LicenseRule;
 use GlpiPlugin\Sac\License\RetirePublisherFindings;
 use GlpiPlugin\Sac\Migration as SacMigration;
 use GlpiPlugin\Sac\RightDefinition;
@@ -9,6 +10,16 @@ function plugin_sac_install(): bool
 {
     SacMigration::install();
     RightDefinition::addOnInstall();
+
+    // Baseline licence rules, on every install/upgrade. Idempotent: an existing
+    // (entity 0, match_on, pattern) row is never rewritten, so an admin's edit
+    // survives. Logged, not fatal — the tables are already in place, and the
+    // next install simply retries.
+    try {
+        LicenseRule::seedFromCsv();
+    } catch (\Throwable $e) {
+        \Toolbox::logInFile('sac', 'LicenseRule::seedFromCsv: ' . $e->getMessage() . "\n");
+    }
 
     // One-shot, marker-guarded: runs on every upgrade, does work only once.
     // A failure must not abort the upgrade — the marker was not written, so the
