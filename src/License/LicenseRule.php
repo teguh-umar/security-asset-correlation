@@ -20,6 +20,9 @@ final class LicenseRule
                 sac_assert(LicenseRule::validate(['pattern' => 'x', 'match_on' => 'name', 'classification' => 'free', 'reason' => '  ']) !== null, 'a blank reason is rejected: the table is maintained by another team');
                 sac_assert(LicenseRule::validate(['pattern' => '*', 'match_on' => 'name', 'classification' => 'free', 'reason' => 'r']) !== null, 'a bare * would classify the whole estate from one row');
                 sac_assert(LicenseRule::validate(['pattern' => '', 'match_on' => 'name', 'classification' => 'free', 'reason' => 'r']) !== null, 'an empty pattern is rejected');
+                sac_assert(LicenseRule::validate(['pattern' => 'x', 'match_on' => 'name', 'classification' => 'free', 'reason' => ['x']]) !== null, 'an array reason is rejected, not cast to the string "Array"');
+                sac_assert(LicenseRule::validate(['pattern' => 'x', 'match_on' => 'name', 'classification' => 'free']) !== null, 'a missing reason key is rejected');
+                sac_assert(LicenseRule::validate(['pattern' => ' mysql-* ', 'match_on' => 'name', 'classification' => 'free', 'reason' => 'r']) !== null, 'an untrimmed pattern is rejected: it would be stored and never match');
             },
             'license/rule-specificity' => static function (): void {
                 sac_assert(LicenseRule::specificity('mysql-community-server') > LicenseRule::specificity('mysql-*'), 'a literal beats a prefix');
@@ -29,6 +32,9 @@ final class LicenseRule
                 sac_assert(LicenseRule::matchesPattern('*.el9', 'openssl-3.0.7-28.el9'), 'suffix glob');
                 sac_assert(LicenseRule::matchesPattern('*el9*', '8.1.27-1.module+el9.3.0+90130+7e4e1ce0'), 'the modular form is reachable by a pattern that does not assume a leading dot');
                 sac_assert(!LicenseRule::matchesPattern('*.el9', '8.1.27-1.module+el9.3.0+90130+7e4e1ce0'), 'and the naive dotted pattern does NOT reach it — this is the case that made the design');
+                sac_assert(LicenseRule::matchesPattern('*el9*', "name\nel9"), 'a newline in the subject does not stop a wildcard');
+                sac_assert(LicenseRule::matchesPattern('*a*a*a*a*', str_repeat('a', 5000) . 'b'), 'a run of stars collapses; a long subject still matches');
+                sac_assert(!LicenseRule::matchesPattern('*a*a*a*a*b', str_repeat('a', 5000)), 'a long non-matching subject returns false promptly');
             },
         ];
     }
@@ -49,10 +55,20 @@ final class LicenseRule
      */
     public static function validate(array $input): ?string
     {
-        $pattern        = (string) ($input['pattern'] ?? '');
-        $matchOn        = (string) ($input['match_on'] ?? '');
-        $classification = (string) ($input['classification'] ?? '');
-        $reason         = (string) ($input['reason'] ?? '');
+        foreach (['pattern', 'match_on', 'classification', 'reason'] as $key) {
+            if (!array_key_exists($key, $input)) {
+                return $key . ' is required';
+            }
+            // A non-string must not reach a (string) cast: an array would become "Array".
+            if (!is_string($input[$key])) {
+                return $key . ' must be a string';
+            }
+        }
+
+        $pattern        = $input['pattern'];
+        $matchOn        = $input['match_on'];
+        $classification = $input['classification'];
+        $reason         = $input['reason'];
 
         if (!in_array($classification, self::CLASSIFICATIONS, true)) {
             return 'classification must be one of: ' . implode(', ', self::CLASSIFICATIONS);
@@ -62,6 +78,11 @@ final class LicenseRule
         }
         if (trim($pattern) === '') {
             return 'pattern must not be empty';
+        }
+        // The stored value is used verbatim by matchesPattern(); surrounding
+        // whitespace would make the rule silently match nothing.
+        if ($pattern !== trim($pattern)) {
+            return 'pattern must not have leading or trailing whitespace';
         }
         if (strlen($pattern) > self::PATTERN_MAX) {
             return 'pattern must be at most ' . self::PATTERN_MAX . ' characters';
@@ -91,11 +112,14 @@ final class LicenseRule
     }
 
     /**
-     * PURE. Case-insensitive glob; `*` is the only wildcard.
+     * PURE. Case-insensitive glob; `*` is the only wildcard. Runs of `*` are
+     * collapsed first so `*a*a*a*` cannot backtrack polynomially; the `s` flag
+     * lets a wildcard span a newline in the subject.
      */
     public static function matchesPattern(string $pattern, string $subject): bool
     {
-        $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/iD';
+        $collapsed = preg_replace('/\*+/', '*', $pattern) ?? $pattern;
+        $regex     = '/^' . str_replace('\*', '.*', preg_quote($collapsed, '/')) . '$/isD';
 
         return preg_match($regex, $subject) === 1;
     }
