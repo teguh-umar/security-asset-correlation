@@ -210,6 +210,23 @@ final class Migration
               UNIQUE KEY `entity_match` (`entities_id`,`match_on`,`pattern`),
               KEY `entity_classification` (`entities_id`,`classification`)
             ) $table_options";
+
+        // Review queue: software no rule decides. A row means SAC does not know
+        // whether it needs a licence and deliberately asserts nothing. One row per
+        // (software, entity); `decided` rows are never reopened by a scan.
+        self::$tables['glpi_plugin_sac_licensereview'] = "
+            CREATE TABLE `glpi_plugin_sac_licensereview` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `softwares_id` int unsigned NOT NULL DEFAULT 0,
+              `entities_id` int unsigned NOT NULL DEFAULT 0,
+              `state` varchar(20) NOT NULL DEFAULT 'new',
+              `note` text,
+              `date_first_seen` timestamp NULL DEFAULT NULL,
+              `date_mod` timestamp NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `software_entity` (`softwares_id`,`entities_id`),
+              KEY `entity_state` (`entities_id`,`state`)
+            ) $table_options";
     }
 
     /**
