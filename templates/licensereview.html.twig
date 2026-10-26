@@ -1,0 +1,250 @@
+{#
+ # SAC — licence review queue. Software no rule decides: flag it, decide it,
+ # then (optionally) generalise the decision into a wider rule.
+ # Autoescape ON — no |raw on plugin data. CSRF token field on every form.
+ # `action` = front/licensereview.php prefixed URL.
+ # `rows` = queue rows visible to the user; `decided` = showing decided rows.
+ # `toggle_url` flips the open / decided view.
+ # `panel` = generalisation panel for one decided row, or null.
+ # `preview` = RulePreview result for the posted pattern, or null.
+ # `can_act` = UPDATE on plugin_sac_finding; `sees_all` = no entity filter.
+ #}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="card-title">
+            {{ decided ? __('Decided review queue rows', 'sac') : __('License review queue', 'sac') }}
+        </span>
+        <a href="{{ toggle_url }}" class="btn btn-sm btn-outline-secondary">
+            {{ decided ? __('Show open rows', 'sac') : __('Show decided rows', 'sac') }}
+        </a>
+    </div>
+    <div class="card-body">
+        {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        {% if not sees_all %}
+            <div class="alert alert-secondary">
+                {{ __('Showing only queue rows for the entities you can see.', 'sac') }}
+            </div>
+        {% endif %}
+
+        {% if not can_act %}
+            <div class="alert alert-secondary">
+                {{ __('Flagging and deciding needs the update right on Security Assessment findings.', 'sac') }}
+            </div>
+        {% endif %}
+
+        {% if not decided %}
+            <div class="alert alert-info">
+                <p class="mb-1"><strong>{{ __('How a row is settled', 'sac') }}</strong></p>
+                <ol class="mb-0">
+                    <li>{{ __('A row is software that no licence rule decides. SAC asserts nothing about it, so it is neither free nor licensed by default.', 'sac') }}</li>
+                    <li><strong>{{ __('Flag', 'sac') }}</strong>{{ __(' it with a note when someone else must look. The row stays open.', 'sac') }}</li>
+                    <li><strong>{{ __('Decide', 'sac') }}</strong>{{ __(' it as Free or Needs a license. The decision is saved immediately as an exact rule for this software name in this row\'s entity.', 'sac') }}</li>
+                    <li>{{ __('SAC then offers to generalise that exact rule into a wider pattern. The offer shows every installed software the pattern would cover before the rule is replaced.', 'sac') }}</li>
+                </ol>
+            </div>
+        {% else %}
+            <div class="alert alert-secondary">
+                {{ __('Decided rows stay here as a record. A later scan never reopens one, and each decision became a rule on the License rules page.', 'sac') }}
+            </div>
+        {% endif %}
+
+        {% if panel %}
+            <div class="card border-primary mb-4">
+                <div class="card-header">
+                    <span class="card-title">{{ __('Generalise the decision', 'sac') }}</span>
+                </div>
+                <div class="card-body">
+                    <p>
+                        {{ __('The decision is already saved as an exact rule for', 'sac') }}
+                        <code>{{ panel.software }}</code>
+                        {{ __('in', 'sac') }} <strong>{{ panel.entity }}</strong>
+                        ({{ panel.classification == 'free' ? __('Free', 'sac') : __('Needs a license', 'sac') }}).
+                    </p>
+                    <p class="text-muted">
+                        {{ __('A wider pattern replaces that exact rule. Check the list first: it is every installed software in your entities the pattern would decide, not only what was queued.', 'sac') }}
+                    </p>
+
+                    <form method="post" action="{{ action }}" class="mb-3">
+                        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="row_id" value="{{ panel.row_id }}">
+                        <input type="hidden" name="task" value="preview">
+                        <div class="row g-2">
+                            <div class="col-md-5">
+                                <label class="form-label" for="sac-review-pattern">{{ __('Proposed pattern', 'sac') }}</label>
+                                <input type="text" class="form-control" id="sac-review-pattern" name="pattern"
+                                       value="{{ panel.pattern }}" maxlength="255" required>
+                                <div class="form-text">{{ __('Glob: * is the only wildcard.', 'sac') }}</div>
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label" for="sac-review-reason">{{ __('Reason', 'sac') }}</label>
+                                <textarea class="form-control" id="sac-review-reason" name="reason" rows="2" required>{{ panel.reason }}</textarea>
+                                <div class="form-text">{{ __('Mandatory, and it is what the rule table shows.', 'sac') }}</div>
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-outline-primary">
+                                    {{ __('Preview what this pattern covers', 'sac') }}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    {% if preview %}
+                        {% if preview.error %}
+                            <div class="alert alert-warning">{{ preview.error }}</div>
+                        {% endif %}
+
+                        <div class="alert alert-secondary">
+                            <p class="mb-2">
+                                {{ __('This pattern would cover', 'sac') }}
+                                <strong>{{ preview.visible|length }}</strong>
+                                {{ __('installed software in your entities:', 'sac') }}
+                            </p>
+                            {% if preview.visible is empty %}
+                                <p class="text-muted mb-0">{{ __('Nothing installed matches this pattern.', 'sac') }}</p>
+                            {% else %}
+                                <ul class="mb-2">
+                                    {% for name in preview.visible %}
+                                        <li><code>{{ name }}</code></li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                            {% if preview.hidden_count > 0 %}
+                                <p class="mb-0">
+                                    {{ __('Matching rows outside the entities you can see:', 'sac') }}
+                                    <strong>{{ preview.hidden_count }}</strong>
+                                    {{ __('They are counted, not listed.', 'sac') }}
+                                </p>
+                            {% endif %}
+                        </div>
+
+                        {% if not preview.error %}
+                            <form method="post" action="{{ action }}">
+                                <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="row_id" value="{{ panel.row_id }}">
+                                <input type="hidden" name="task" value="save_rule">
+                                <input type="hidden" name="previewed" value="1">
+                                <input type="hidden" name="pattern" value="{{ preview.pattern }}">
+                                <p class="mb-2">
+                                    {{ __('Replace the exact rule with:', 'sac') }}
+                                    <code>{{ preview.pattern }}</code>
+                                    ({{ preview.classification == 'free' ? __('Free', 'sac') : __('Needs a license', 'sac') }})
+                                </p>
+                                <div class="mb-2">
+                                    <label class="form-label" for="sac-review-save-reason">{{ __('Reason', 'sac') }}</label>
+                                    <textarea class="form-control" id="sac-review-save-reason" name="reason" rows="2" required>{{ preview.reason }}</textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    {{ __('Replace the exact rule', 'sac') }}
+                                </button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if rows is empty %}
+            <div class="text-center text-muted">
+                {{ decided ? __('No decided rows yet', 'sac') : __('Nothing waiting for a decision', 'sac') }}
+            </div>
+        {% elseif decided %}
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th data-sortable>{{ __('Software', 'sac') }}</th>
+                        <th data-sortable>{{ __('Entity', 'sac') }}</th>
+                        <th data-sortable>{{ __('Note', 'sac') }}</th>
+                        <th data-sortable>{{ __('First seen', 'sac') }}</th>
+                        <th data-sortable>{{ __('Last changed', 'sac') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td><code>{{ row.software }}</code></td>
+                        <td>{{ row.entity }}</td>
+                        <td>{{ row.note ?: '—' }}</td>
+                        <td>{{ row.date_first_seen }}</td>
+                        <td>{{ row.date_mod }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% include '@sac/_sortable-table.html.twig' %}
+        {% else %}
+            {% for row in rows %}
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>
+                            <strong><code>{{ row.software }}</code></strong>
+                            <span class="text-muted">— {{ row.entity }}</span>
+                        </span>
+                        {% if row.state == 'flagged' %}
+                            <span class="badge bg-info text-dark">{{ __('Flagged', 'sac') }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary text-white">{{ __('New', 'sac') }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">
+                            {{ __('First seen', 'sac') }} {{ row.date_first_seen }}
+                            &middot; {{ __('Last refreshed', 'sac') }} {{ row.date_mod }}
+                        </p>
+                        {% if row.note %}
+                            <p class="mb-3"><strong>{{ __('Note:', 'sac') }}</strong> {{ row.note }}</p>
+                        {% endif %}
+
+                        {% if row.can_act %}
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <form method="post" action="{{ action }}">
+                                        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="task" value="flag">
+                                        <label class="form-label" for="sac-review-note-{{ row.id }}">{{ __('Flag for someone else', 'sac') }}</label>
+                                        <input type="text" class="form-control mb-2" id="sac-review-note-{{ row.id }}"
+                                               name="note" value="{{ row.note }}" maxlength="2000" required>
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                            {{ row.state == 'flagged' ? __('Update the note', 'sac') : __('Flag this row', 'sac') }}
+                                        </button>
+                                    </form>
+                                </div>
+                                <div class="col-md-8">
+                                    <form method="post" action="{{ action }}">
+                                        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="task" value="decide">
+                                        <label class="form-label" for="sac-review-class-{{ row.id }}">{{ __('Decide this software', 'sac') }}</label>
+                                        <div class="row g-2">
+                                            <div class="col-md-4">
+                                                <select class="form-select" id="sac-review-class-{{ row.id }}" name="classification">
+                                                    <option value="needs_license">{{ __('Needs a license', 'sac') }}</option>
+                                                    <option value="free">{{ __('Free', 'sac') }}</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-8">
+                                                <input type="text" class="form-control" name="reason"
+                                                       placeholder="{{ __('Why this software does or does not need a license', 'sac') }}"
+                                                       maxlength="2000" required>
+                                            </div>
+                                            <div class="col-12">
+                                                <button type="submit" class="btn btn-sm btn-primary">
+                                                    {{ __('Decide and save an exact rule', 'sac') }}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        {% else %}
+                            <span class="text-muted">{{ __('Read only', 'sac') }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+</div>

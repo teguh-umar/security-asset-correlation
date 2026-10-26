@@ -46,6 +46,7 @@ final class Menu
         $overview   = '/plugins/sac/front/overview.php';
         $compliance = '/plugins/sac/front/compliance.php';
         $rules      = '/plugins/sac/front/licenserules.php';
+        $review     = '/plugins/sac/front/licensereview.php';
         $reconcile  = '/plugins/sac/front/reconcile.php';
         $runs       = '/plugins/sac/front/run.php';
 
@@ -72,6 +73,12 @@ final class Menu
                     'page'  => $rules,
                     'icon'  => 'ti ti-license',
                     'links' => ['search' => $rules],
+                ],
+                'licensereview' => [
+                    'title' => __('License review', 'sac'),
+                    'page'  => $review,
+                    'icon'  => 'ti ti-clipboard-check',
+                    'links' => ['search' => $review],
                 ],
                 'reconcile' => [
                     'title' => __('Reconcile', 'sac'),
@@ -100,13 +107,19 @@ final class Menu
                     return;
                 }
                 sac_assert_eq($entry['order'], self::ORDER, 'suite order');
-                sac_assert_eq(array_keys($entry['options']), ['overview', 'compliance', 'licenserules', 'reconcile', 'runs'], 'option keys');
+                sac_assert_eq(array_keys($entry['options']), ['overview', 'compliance', 'licenserules', 'licensereview', 'reconcile', 'runs'], 'option keys');
                 sac_assert_eq($entry['page'], $entry['options']['overview']['page'], 'entry opens the first option');
                 sac_assert(($entry['options']['licenserules']['title'] ?? '') !== '', 'the rules entry has a title');
                 sac_assert_eq(
                     $entry['options']['licenserules']['page'] ?? '',
                     '/plugins/sac/front/licenserules.php',
                     'the rules entry points at its page'
+                );
+                sac_assert(($entry['options']['licensereview']['title'] ?? '') !== '', 'the review entry has a title');
+                sac_assert_eq(
+                    $entry['options']['licensereview']['page'] ?? '',
+                    '/plugins/sac/front/licensereview.php',
+                    'the review entry points at its page'
                 );
                 foreach ($entry['options'] as $key => $option) {
                     sac_assert(is_file(dirname(__DIR__) . substr($option['page'], strlen('/plugins/sac'))), "$key page exists");
