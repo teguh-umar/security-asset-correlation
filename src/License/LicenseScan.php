@@ -74,7 +74,7 @@ final class LicenseScan
             // GLPI would show it there (see licenseAggregate()).
             $overEntities = [];
             $swEntities   = []; // entities where this run asserts the classification Finding
-            $versions     = (array) ($sw['versions'] ?? []);
+            $byComputer   = (array) ($sw['versions_by_computer'] ?? []);
             // A manufacturers_id pointing at a deleted row is simply "not on the
             // watch list": the rule below still decides. No manufacturer lookup
             // gates classification.
@@ -90,6 +90,9 @@ final class LicenseScan
                 $anyLicense = $anyLicense || $hasLicense;
 
                 // --- 2a: the classification rule decides; the watch list only feeds the queue
+                // Version evidence is this entity's own installs only: a version
+                // installed solely in another entity must not undecide it here.
+                $versions = self::versionsForHosts($byComputer, array_keys($hostsById));
                 $verdict = self::classify($swName, $versions, $rules, self::ancestry((int) $entity), $onWatchList, $hasLicense);
                 if ($verdict['action'] === 'finding') {
                     $rule  = (array) $verdict['rule'];
@@ -230,7 +233,9 @@ final class LicenseScan
         $rule = RuleMatcher::decide($softwareName, $versionNames, $applicable, $ancestry);
         if ($rule === null) {
             // Undecided: a question for a human, never a Finding. A licensed
-            // product is not a question.
+            // product is deliberately NOT queued: the queue is a worklist of
+            // potential gaps, and padding it with settled software would make
+            // it grow unread.
             return ['action' => $onWatchList && !$hasLicense ? 'queue' : 'none', 'rule' => null];
         }
         if ((string) $rule['classification'] === 'needs_license' && !$hasLicense) {
@@ -258,16 +263,66 @@ final class LicenseScan
         return $rules;
     }
 
+    /**
+     * PURE. Distinct installed version names for the given computers.
+     *
+     * @param array<int,array<int,string>> $byComputer computers_id => version names
+     * @param array<int,int|string>        $computerIds
+     * @return string[]
+     */
+    public static function versionsForHosts(array $byComputer, array $computerIds): array
+    {
+        $out = [];
+        foreach ($computerIds as $cid) {
+            foreach ($byComputer[(int) $cid] ?? [] as $name) {
+                $out[(string) $name] = (string) $name;
+            }
+        }
+        return array_values($out);
+    }
+
+    /**
+     * PURE. The entity first, then its ancestors, nearest first.
+     *
+     * Order is derived from `glpi_entities.level` (deeper = nearer), never from
+     * the order getAncestorsOf() returns. Guarantee: strictly descending level,
+     * ties (not possible in a tree) broken by id.
+     *
+     * @param int[]            $ancestorIds ancestors in any order
+     * @param array<int,int>   $levelById   entities_id => level
+     * @return int[]
+     */
+    public static function nearestFirst(int $entity, array $ancestorIds, array $levelById): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $ancestorIds),
+            static fn (int $id): bool => $id !== $entity
+        )));
+        usort($ids, static fn (int $a, int $b): int =>
+            [(int) ($levelById[$b] ?? 0), $a] <=> [(int) ($levelById[$a] ?? 0), $b]);
+        return array_merge([$entity], $ids);
+    }
+
     /** @return array<int,int> the entity first, then its ancestors, nearest first */
     private static function ancestry(int $entity): array
     {
+        global $DB;
+
         /** @var array<int,array<int,int>> $cache */
         static $cache = [];
         if (!isset($cache[$entity])) {
-            // getAncestorsOf() lists root first; the matcher wants nearest first.
-            $cache[$entity] = $entity === 0
-                ? [0]
-                : array_merge([$entity], array_reverse(array_values(array_map('intval', getAncestorsOf('glpi_entities', $entity)))));
+            if ($entity === 0) {
+                $cache[$entity] = [0];
+            } else {
+                $ancestors = array_values(array_map('intval', getAncestorsOf('glpi_entities', $entity)));
+                $levels = [];
+                if ($ancestors !== []) {
+                    foreach ($DB->request(['SELECT' => ['id', 'level'], 'FROM' => 'glpi_entities', 'WHERE' => ['id' => $ancestors]]) as $row) {
+                        $levels[(int) $row['id']] = (int) $row['level'];
+                    }
+                }
+                $cache[$entity] = self::nearestFirst($entity, $ancestors, $levels);
+            }
         }
         return $cache[$entity];
     }
@@ -299,7 +354,7 @@ final class LicenseScan
      * ignore rule still matches (I14).
      *
      * @param array<int,string> $ignore
-     * @return iterable<array{id:int|string,name:?string,manufacturers_id:int|string,versions:array<int,string>}>
+     * @return iterable<array{id:int|string,name:?string,manufacturers_id:int|string,versions_by_computer:array<int,array<int,string>>}>
      */
     private static function candidateSoftware(array $ignore): iterable
     {
@@ -318,7 +373,7 @@ final class LicenseScan
         }
 
         // One row per (software, installed version name), folded back into one
-        // software with a `versions` list below. Not GROUP_CONCAT: its 1024-byte
+        // software with a per-computer version map below. Not GROUP_CONCAT: its 1024-byte
         // default would silently truncate a long version list, and the matcher
         // needs every installed version. The INNER JOINs keep the old "has a
         // referenced version on a Computer" rule. There is deliberately no
@@ -326,7 +381,7 @@ final class LicenseScan
         // the software.
         $sql = "SELECT DISTINCT `sw`.`id` AS `id`, `sw`.`name` AS `name`,
                        `sw`.`manufacturers_id` AS `manufacturers_id`,
-                       `sv`.`name` AS `version_name`
+                       `sv`.`name` AS `version_name`, `isv`.`items_id` AS `computers_id`
                 FROM `glpi_softwares` AS `sw`
                 LEFT JOIN `glpi_softwarecategories` AS `cat` ON `cat`.`id` = `sw`.`softwarecategories_id`
                 INNER JOIN `glpi_softwareversions` AS `sv` ON `sv`.`softwares_id` = `sw`.`id`
@@ -354,10 +409,10 @@ final class LicenseScan
                     'id'               => $row['id'],
                     'name'             => $row['name'],
                     'manufacturers_id' => $row['manufacturers_id'],
-                    'versions'         => [],
+                    'versions_by_computer' => [],
                 ];
             }
-            $current['versions'][] = (string) ($row['version_name'] ?? '');
+            $current['versions_by_computer'][(int) $row['computers_id']][] = (string) ($row['version_name'] ?? '');
         }
         if ($current !== null) {
             yield $current;
@@ -587,6 +642,24 @@ final class LicenseScan
                 $local['is_recursive'] = 0;
                 sac_assert_eq(self::classify('acme-db', ['1.0'], [$local], [5, 0], false, false)['action'], 'none', 'a non-recursive parent rule does not reach a child entity');
                 sac_assert_eq(self::classify('acme-db', ['1.0'], [$needs], [5, 0], false, false)['action'], 'finding', 'a recursive parent rule does');
+            },
+            'license/ancestry-nearest-first-whatever-the-input-order' => static function () use ($needs): void {
+                // 3 levels: 0 (root) > 3 > 7. Ancestors arrive in BOTH orders.
+                $levels = [0 => 0, 3 => 1, 7 => 2];
+                sac_assert_eq(self::nearestFirst(9, [0, 3, 7], $levels), [9, 7, 3, 0], 'root-first input');
+                sac_assert_eq(self::nearestFirst(9, [7, 3, 0], $levels), [9, 7, 3, 0], 'nearest-first input');
+                $rootExact = ['id' => 1, 'entities_id' => 0, 'is_recursive' => 1, 'pattern' => 'acme-db', 'match_on' => 'name', 'classification' => 'needs_license'];
+                $nearBroad = ['id' => 2, 'entities_id' => 7, 'is_recursive' => 1, 'pattern' => 'acme-*', 'match_on' => 'name', 'classification' => 'free'];
+                foreach ([[0, 3, 7], [7, 3, 0]] as $input) {
+                    $c = self::classify('acme-db', ['1'], [$rootExact, $nearBroad], self::nearestFirst(9, $input, $levels), false, false);
+                    sac_assert_eq($c['action'], 'none', 'the nearest entity broad rule beats a root exact rule');
+                    sac_assert_eq((int) $c['rule']['id'], 2, 'rule from the nearest ancestor decided');
+                }
+            },
+            'license/versions-are-per-entity' => static function (): void {
+                $by = [1 => ['1.0'], 2 => ['1.0'], 3 => ['9.9-el9']];
+                sac_assert_eq(self::versionsForHosts($by, [1, 2]), ['1.0'], 'entity A sees only its own versions, deduplicated');
+                sac_assert_eq(self::versionsForHosts($by, [3]), ['9.9-el9'], 'entity B');
             },
             'license/severity-fallback' => static function (): void {
                 sac_assert_eq(self::licenseSeverity('High'), 'High', 'a valid severity is kept');
