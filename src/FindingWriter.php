@@ -166,13 +166,15 @@ final class FindingWriter
      *
      * @param array<int,int> $keepEntities entities whose finding was just upserted
      * @param array<int,int>|null $scope {@see Config::scanScope()}; null = every entity
+     * @return int number of findings that actually gained a cleared note
      */
-    public static function clearExcept(string $code, array $keepEntities, string $why, RunLog $run, ?array $scope = null): void
+    public static function clearExcept(string $code, array $keepEntities, string $why, RunLog $run, ?array $scope = null): int
     {
         if (!self::isAvailable()) {
-            return;
+            return 0;
         }
 
+        $cleared = 0;
         $f = new \GlpiPlugin\Riskregister\Finding();
         foreach ($f->find(['code' => $code]) as $id => $row) {
             $entity = (int) $row['entities_id'];
@@ -186,8 +188,11 @@ final class FindingWriter
                 }
                 continue;
             }
-            self::appendClearedNote((int) $id, $row, $why, $run);
+            if (self::appendClearedNote((int) $id, $row, $why, $run)) {
+                $cleared++;
+            }
         }
+        return $cleared;
     }
 
     /**
@@ -282,7 +287,7 @@ final class FindingWriter
      * pre-split Root finding can stay cleared for good, so that would grow
      * without bound.
      */
-    private static function appendClearedNote(int $id, array $row, string $why, RunLog $run): void
+    private static function appendClearedNote(int $id, array $row, string $why, RunLog $run): bool
     {
         $f        = new \GlpiPlugin\Riskregister\Finding();
         $existing = (string) ($row['content'] ?? '');
@@ -292,12 +297,13 @@ final class FindingWriter
             if ((int) ($row['is_recursive'] ?? 0) !== 0) {
                 $f->update(['id' => $id, 'is_recursive' => 0]);
             }
-            return;
+            return false;
         }
 
         $note = "\n\n---\nSignal cleared on " . date('Y-m-d') . ': ' . $why;
         $f->update(['id' => $id, 'is_recursive' => 0, 'content' => $existing . $note]);
         $run->bump('findings_cleared');
+        return true;
     }
 
     /** @return array<string,callable():void> */

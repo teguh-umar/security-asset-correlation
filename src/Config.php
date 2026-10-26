@@ -323,6 +323,26 @@ final class Config
         }
     }
 
+    /**
+     * A one-shot install marker (absent = never done).
+     *
+     * Deliberately NOT in DEFAULTS/FIELD_TYPES: those are user settings, and
+     * `db/config-sections-cover-all-keys` requires every one of them to be
+     * rendered on the Setup page. Internal state has no widget and must not
+     * pretend to have one.
+     */
+    public static function marker(string $key): bool
+    {
+        $conf = \Config::getConfigurationValues(self::CONTEXT, [$key]);
+        return !empty($conf[$key]);
+    }
+
+    /** Set a one-shot install marker. Absence/0 means "not done, retry". */
+    public static function markDone(string $key): void
+    {
+        \Config::setConfigurationValues(self::CONTEXT, [$key => 1]);
+    }
+
     public static function selfChecks(): array
     {
         return [
