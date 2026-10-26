@@ -80,6 +80,7 @@ final class ReviewQueue
             'db/reviewqueue-sync-is-idempotent' => static function (): void {
                 global $DB;
                 $eid = 987001;
+                $DB->delete(self::TABLE, ['entities_id' => $eid]); // self-heal after a killed run
                 try {
                     $r1 = self::sync($eid, [9001, 9002], '2026-10-01 02:00:00');
                     sac_assert_eq($r1['new'], 2, 'first run queues both');
@@ -95,6 +96,7 @@ final class ReviewQueue
             'db/reviewqueue-decided-is-not-resurrected' => static function (): void {
                 global $DB;
                 $eid = 987002;
+                $DB->delete(self::TABLE, ['entities_id' => $eid]); // self-heal after a killed run
                 try {
                     self::sync($eid, [9101, 9102], '2026-10-01 02:00:00');
                     $DB->update(self::TABLE, ['state' => 'decided', 'note' => 'ok'], ['entities_id' => $eid, 'softwares_id' => 9101]);
@@ -103,7 +105,7 @@ final class ReviewQueue
                     $row = $DB->request(['FROM' => self::TABLE, 'WHERE' => ['entities_id' => $eid, 'softwares_id' => 9101]])->current();
                     sac_assert_eq((string) $row['state'], 'decided', 'still decided');
                     sac_assert_eq((string) $row['date_mod'], '2026-10-01 02:00:00', 'untouched by the later scan');
-                    sac_assert_eq(array_column(self::openFor($eid), 'softwares_id'), [9102], 'only the undecided row is open');
+                    sac_assert_eq(array_map('intval', array_column(self::openFor($eid), 'softwares_id')), [9102], 'only the undecided row is open');
                 } finally {
                     $DB->delete(self::TABLE, ['entities_id' => $eid]);
                 }
