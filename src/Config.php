@@ -33,6 +33,7 @@ final class Config
         'license_ignore_categories'    => '["system_component"]',
         'license_2a_products_threshold'=> 5,
         'license_2a_installs_threshold'=> 20,
+        'license_missing_severity'     => 'Medium',
         'compliance_scan_enabled'      => 1,
         'compliance_ssh_key_path'      => '/etc/sac-collect/sac_collect_key',
         'compliance_ssh_known_hosts_path' => '/etc/sac-collect/known_hosts',
@@ -74,6 +75,7 @@ final class Config
         'license_ignore_categories'    => 'softwarecategories',
         'license_2a_products_threshold'=> 'int',
         'license_2a_installs_threshold'=> 'int',
+        'license_missing_severity'     => 'text',
         'compliance_scan_enabled'      => 'bool',
         'compliance_ssh_key_path'      => 'text',
         'compliance_ssh_known_hosts_path' => 'text',
@@ -228,6 +230,10 @@ final class Config
                         'label' => __('…or above', 'sac'),
                         'hint'  => '',
                         'unit'  => __('installs', 'sac'),
+                    ],
+                    'license_missing_severity' => [
+                        'label' => __('Severity of a licence-required finding', 'sac'),
+                        'hint'  => __('Critical, High, Medium or Low. Applies to software a classification rule says needs a licence and that has none recorded.', 'sac'),
                     ],
                     'license_ignore_categories' => [
                         'label' => __('Software categories to ignore', 'sac'),
