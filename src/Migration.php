@@ -187,6 +187,29 @@ final class Migration
               UNIQUE KEY `computer_rule` (`computers_id`,`rule_id`),
               KEY `computer_state` (`computers_id`,`state`)
             ) $table_options";
+
+        // v1.9.0: Module 2 licence classification — one row per per-entity rule
+        // that decides whether a product is `free` or `needs_license`, replacing
+        // the publisher-based decision. The UNIQUE key is `(entities_id, match_on,
+        // pattern)` rather than `pattern` alone because the same pattern may
+        // legitimately exist in two entities (each entity classifies on its own),
+        // and a name-rule and a version-rule may share a pattern string — the
+        // `match_on` column is what keeps those two apart.
+        self::$tables['glpi_plugin_sac_licenserules'] = "
+            CREATE TABLE `glpi_plugin_sac_licenserules` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `entities_id` int unsigned NOT NULL DEFAULT 0,
+              `is_recursive` tinyint(1) NOT NULL DEFAULT 0,
+              `pattern` varchar(255) NOT NULL DEFAULT '',
+              `match_on` varchar(10) NOT NULL DEFAULT 'name',
+              `classification` varchar(20) NOT NULL DEFAULT 'needs_license',
+              `reason` text,
+              `date_creation` timestamp NULL DEFAULT NULL,
+              `date_mod` timestamp NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `entity_match` (`entities_id`,`match_on`,`pattern`),
+              KEY `entity_classification` (`entities_id`,`classification`)
+            ) $table_options";
     }
 
     /**
@@ -404,6 +427,20 @@ final class Migration
                     sac_assert($DB->fieldExists($t, $col), "$col column");
                 }
                 sac_assert(self::keyExists($DB, $t, 'computer_rule'), 'UNIQUE key on (computers_id, rule_id)');
+            },
+
+            'db/migration-licenserules-table' => static function (): void {
+                global $DB;
+                $t = 'glpi_plugin_sac_licenserules';
+                sac_assert($DB->tableExists($t), 'table created by install()');
+                foreach ([
+                    'entities_id', 'is_recursive', 'pattern', 'match_on',
+                    'classification', 'reason', 'date_creation', 'date_mod',
+                ] as $col) {
+                    sac_assert($DB->fieldExists($t, $col), "$col column");
+                }
+                sac_assert(self::keyExists($DB, $t, 'entity_match'), 'UNIQUE key on (entities_id, match_on, pattern)');
+                sac_assert(self::keyExists($DB, $t, 'entity_classification'), 'KEY on (entities_id, classification)');
             },
 
             'db/migration-sshtargets-table' => static function (): void {
