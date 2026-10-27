@@ -98,7 +98,7 @@ if (Session::haveRight('config', READ)) {
 }
 
 // No option and no sub-nav: this page is not one of the menu entry's options.
-Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac');
+Html::header(__('Security-Asset Correlation', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac');
 
 SuiteConfig::render();
 

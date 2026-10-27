@@ -147,7 +147,7 @@ $computerDropdown = Dropdown::show('Computer', [
     'display' => false,
 ]);
 
-Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'compliance');
+Html::header(__('Security-Asset Correlation', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'compliance');
 \GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'compliance');
 
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/sshtargets.html.twig', [

@@ -61,7 +61,7 @@ foreach ($DB->request([
 
 $canManageTargets = \Session::haveRight('plugin_sac_config', UPDATE);
 
-Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'compliance');
+Html::header(__('Security-Asset Correlation', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'compliance');
 \GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'compliance');
 
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/compliance.html.twig', [

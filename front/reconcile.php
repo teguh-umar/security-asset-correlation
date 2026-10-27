@@ -53,7 +53,7 @@ if (isset($_POST['reopen'])) {
 
 $includeResolved = (bool) ($_GET['resolved'] ?? false);
 
-Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'reconcile');
+Html::header(__('Security-Asset Correlation', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'reconcile');
 \GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'reconcile');
 
 $base = Html::getPrefixedUrl('/plugins/sac/front/reconcile.php');

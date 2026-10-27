@@ -71,7 +71,7 @@ Its job ends at a well-formed `Finding`.
 
 ### Operator surface
 
-- **One entry "Security Assessment" in the shared suite sidebar menu** ("ICT Tools"), with a sub-nav between its pages.
+- **One entry "Security-Asset Correlation" in the shared suite sidebar menu** ("ICT Tools"), with a sub-nav between its pages.
 - **Overview** — per-module status cards (last run, counts, open-reconcile count, deep link to the Finding list).
 - **Reconcile queue** — unmapped OS / bad dates / ambiguous publishers, with inline "Map & resolve" and "Resolve" actions.
 - **Scan runs** — last 50 cron runs (module, timing, status, counters) — read-only audit.
@@ -216,7 +216,7 @@ workflow in the UI yet).
 | Tables | `glpi_plugin_sac_{eolmap, eolcache, commercialpublishers, reconcile, run}` |
 | Config context | `plugin:sac` |
 | Rights | `plugin_sac_finding`, `plugin_sac_config` |
-| Menu | entry `sac` ("Security Assessment", `order` 40) in the shared sector `pgnsuite` |
+| Menu | entry `sac` ("Security-Asset Correlation", `order` 40) in the shared sector `pgnsuite` |
 | Cron | `GlpiPlugin\Sac\Cron` — actions `EolScan`, `EolCacheRefresh`, `LicenseScan` (weekly) |
 
 Part of the PGN ICT GLPI 11 plugin suite (`integrasipaman`, `riskregister`,
@@ -283,7 +283,7 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
 8. `php plugins/sac/tools/selfcheck.php` → **all PASS** (this seeds and tears down
    throwaway rows and, on a VM where `riskregister` is active, may create real
    Findings for genuinely-EOL assets — expected).
-9. **Setup → Profiles → "Security Assessment" tab renders and saves.** `Profile.php`
+9. **Setup → Profiles → "Security-Asset Correlation" tab renders and saves.** `Profile.php`
    extends core `\Profile` and posts the rights matrix to `\Profile::getFormURL()`
    with `update` + `id` + `_glpi_csrf_token`; core's `prepareInputForUpdate()` /
    `post_updateItem()` persist the two rights via `ProfileRight::updateProfileRights()`.
@@ -303,7 +303,7 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
     columns exist (the License candidate query filters on both).
 13. Confirm `DBmysql::quote()` is available in the running build (used by the
     License candidate query's category-exclusion list).
-14. Open the Security Assessment section of the suite Setup tab, save the form
+14. Open the Security-Asset Correlation section of the suite Setup tab, save the form
     once, and confirm the values round-trip.
 
 ---

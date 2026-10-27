@@ -29,7 +29,7 @@ foreach ($DB->request([
     ];
 }
 
-Html::header(__('Security Assessment', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'runs');
+Html::header(__('Security-Asset Correlation', 'sac'), '', \GlpiPlugin\Pgnsuite\Menu::SECTOR, 'sac', 'runs');
 \GlpiPlugin\Pgnsuite\Menu::renderSubNav('sac', 'runs');
 
 \Glpi\Application\View\TemplateRenderer::getInstance()->display('@sac/run.html.twig', ['runs' => $runs, 'sees_all' => $seesAll]);
