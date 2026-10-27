@@ -17,7 +17,7 @@ final class Menu
 
     public static function getTypeName($nb = 0): string
     {
-        return __('Security Assessment', 'sac');
+        return __('Security-Asset Correlation', 'sac');
     }
 
     public static function getIcon(): string

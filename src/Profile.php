@@ -6,7 +6,7 @@ use CommonGLPI;
 use Html;
 
 /**
- * "Security Assessment" rights tab on the core Setup → Profiles form.
+ * "Security-Asset Correlation" rights tab on the core Setup → Profiles form.
  *
  * Ported from riskregister/src/Profile.php (VM-verified). Plugin rights only
  * appear in Setup → Profiles when a plugin contributes a Profile tab; we
@@ -31,7 +31,7 @@ class Profile extends \Profile
 {
     public static function getTypeName($nb = 0)
     {
-        return __('Security Assessment', 'sac');
+        return __('Security-Asset Correlation', 'sac');
     }
 
     /**
