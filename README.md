@@ -15,6 +15,14 @@ Its job ends at a well-formed `Finding`.
 
 ---
 
+## SAC and grcmanager
+
+grcmanager (the GRC/ISMS plugin) does **not** replace SAC: it has no EOL
+tracking, no software license compliance and no OpenSCAP results. SAC keeps
+collecting and storing the data, and the `grcbridge` plugin sends the KRI
+`sac_eol_pct` to grcmanager. The full comparison, with NVD and Risk Register
+too, is in [docs/GRCMANAGER-COMPARISON.md](docs/GRCMANAGER-COMPARISON.md).
+
 ## Modules
 
 | # | Module | Status | Signal | Data source |
