@@ -12,3 +12,10 @@ lib/pgnsuite/Menu.php -text
 # plugin) — same autocrlf hazard as above: a CRLF shebang or CRLF inside
 # the script's embedded python3 heredoc would break it outright on Linux.
 tools/host-agent/sac-oscap-summary.sh -text
+
+# Suite governance files (CHARTER.md): kept in the repository, not shipped in the plugin zip.
+# LICENSE and NOTICE stay in the zip.
+AGENTS.md export-ignore
+CHARTER.md export-ignore -text
+CITATION.cff export-ignore
+SECURITY.md export-ignore -text

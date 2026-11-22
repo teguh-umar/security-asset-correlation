@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you reuse this software, please cite it as below."
+title: "Security-Asset Correlation"
+type: software
+abstract: "Correlates security signals (end of life, licences) to GLPI assets and records findings in the Risk Register plugin."
+authors:
+  - given-names: Teguh
+    family-names: DHAMAR
+repository-code: "https://github.com/teguh-umar/security-asset-correlation"
+license: GPL-3.0-or-later
+version: "1.8.0"
+date-released: "2026-11-22"
+keywords:
+  - glpi
+  - glpi-plugin
+  - security
+  - end-of-life
+  - findings
