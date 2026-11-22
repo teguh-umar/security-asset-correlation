@@ -13,7 +13,7 @@ function plugin_version_sac(): array
     return [
         'name'         => 'Security-Asset Correlation',
         'version'      => PLUGIN_SAC_VERSION,
-        'author'       => 'ICT',
+        'author'       => 'Teguh DHAMAR',
         'license'      => 'GPL-3.0-or-later',
         'homepage'     => '',
         'requirements' => [
