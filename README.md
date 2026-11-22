@@ -227,7 +227,7 @@ workflow in the UI yet).
 | Menu | entry `sac` ("Security-Asset Correlation", `order` 40) in the shared sector `pgnsuite` |
 | Cron | `GlpiPlugin\Sac\Cron` — actions `EolScan`, `EolCacheRefresh`, `LicenseScan` (weekly) |
 
-Part of the PGN ICT GLPI 11 plugin suite (`integrasipaman`, `riskregister`,
+Part of a GLPI 11 plugin suite (`integrasipaman`, `riskregister`,
 `drillreport`, `nvd`, SAC), all deployed to one instance. Shared namespace claims
 and integration contracts live in `_pgn-glpi-suite.md` (not in this repo).
 
@@ -330,6 +330,47 @@ Run on the target GLPI instance after `php bin/console glpi:plugin:install sac` 
 
 ---
 
-## License
+## Rights
 
-GPL-3.0-or-later.
+| Right | Name in the profile |
+|---|---|
+| `plugin_sac_config` | see **Administration > Profiles**, tab of this plugin |
+| `plugin_sac_finding` | see **Administration > Profiles**, tab of this plugin |
+
+Users only see rows of the entities they can access.
+
+## Automatic actions
+
+| Action | Default frequency |
+|---|---|
+| `ConfigScan` | see Setup > Automatic actions |
+| `EolCacheRefresh` | weekly |
+| `EolScan` | weekly |
+| `LicenseScan` | weekly |
+
+They can be switched off or rescheduled in **Setup > Automatic actions**.
+
+## Data it stores
+
+`glpi_plugin_sac_commercialpublishers`, `glpi_plugin_sac_configrules`, `glpi_plugin_sac_configscan`, `glpi_plugin_sac_eolcache`, `glpi_plugin_sac_eolmap`, `glpi_plugin_sac_reconcile`, `glpi_plugin_sac_run`, `glpi_plugin_sac_sshtargets`.
+
+Uninstall removes these tables, with the plugin's rights, automatic actions and settings.
+
+## Security
+
+- Every form uses GLPI's CSRF token, and every page checks the plugin's rights and the user's entities.
+- Secrets such as API keys are stored with GLPI's secured configuration, sent once and never shown again.
+- Calls to outside services run only from automatic actions or an explicit button, with a timeout.
+- Report a vulnerability privately as described in [SECURITY.md](SECURITY.md).
+
+## Development
+
+- Offline tests: `php tools/offline-selfcheck.php`
+- Release check: `none yet`
+- Rules for contributors: [CHARTER.md](CHARTER.md) and [AGENTS.md](AGENTS.md).
+- Changes: [CHANGELOG.md](CHANGELOG.md).
+
+## Licence
+
+GPL-3.0-or-later, author Teguh DHAMAR. See [LICENSE](LICENSE) and [NOTICE](NOTICE). To cite this plugin, see
+[CITATION.cff](CITATION.cff).
