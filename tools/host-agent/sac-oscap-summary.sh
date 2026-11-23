@@ -11,7 +11,7 @@
 #   SACCFG1|<benchmark_id>|<score 0-100>|<pass>|<fail>|<other>|<timestamp>
 #
 # The GLPI host reads this file over a restricted, forced-command SSH key
-# (`command="cat <this path>"` in pgnusr's authorized_keys) — it never runs
+# (`command="cat <this path>"` in glpiadmin's authorized_keys) — it never runs
 # oscap itself, never logs in interactively, never gets a shell. This
 # script is the only thing that ever writes the file; the SSH key can only
 # read it.
@@ -31,7 +31,7 @@ set -euo pipefail
 # on this host.
 
 OUTPUT_FILE="${SAC_OUTPUT_FILE:-/var/lib/sac/oscap_summary.txt}"
-OUTPUT_OWNER="${SAC_OUTPUT_OWNER:-root:pgnusr}"
+OUTPUT_OWNER="${SAC_OUTPUT_OWNER:-root:glpiadmin}"
 OUTPUT_MODE="${SAC_OUTPUT_MODE:-640}"
 
 # SSG datastream content file. Auto-detected if not set: picks the first
@@ -74,7 +74,7 @@ log "Using content: $CONTENT_FILE"
 # The product-exclusion list above can tell OS content from browser content,
 # but not one OS VERSION from another: on an OL9 host carrying only
 # ssg-ol7-ds.xml it picks the ol7 file and oscap then reports every rule as
-# notapplicable. Observed on vm-hq-glpi, 2026-10-22: 978 rules, 0 pass,
+# notapplicable. Observed on vm-server-22, 2026-10-22: 978 rules, 0 pass,
 # 0 fail, score 0.00. Warn loudly; the hard stop is the pass+fail check below,
 # which catches the same thing without having to know OS naming conventions.
 if [ -r /etc/os-release ]; then
@@ -244,7 +244,7 @@ ns = {'xccdf': XCCDF}
 CIS_HREFS = {
     # href substring            -> riskregister framework shortname
     'cisecurity.org/controls/': 'CISv7',
-    #   ^ confirmed on vm-dev-damara, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
+    #   ^ confirmed on vm-server-08, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
     #     bare integer codes, observed set 1-9,11-16,18-20. Codes reaching
     #     20 is what identifies v7; v8 has 18 controls.
     # Add a v8 entry ONLY after running the recon on a host that carries it.

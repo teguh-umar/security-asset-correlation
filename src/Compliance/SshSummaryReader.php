@@ -220,8 +220,8 @@ final class SshSummaryReader
                     '/usr/bin/timeout',
                     '/etc/sac-collect/sac_collect_key',
                     '/etc/sac-collect/known_hosts',
-                    'pgnusr',
-                    '10.129.2.112; rm -rf /',
+                    'glpiadmin',
+                    '10.99.2.112; rm -rf /',
                     22,
                     '/var/lib/sac/oscap_summary.txt',
                     15
@@ -230,11 +230,11 @@ final class SshSummaryReader
                 sac_assert_eq($cmd[1], '15', 'timeout seconds is its own element');
                 sac_assert_eq($cmd[2], '/usr/bin/ssh', 'ssh binary follows the timeout wrapper');
                 sac_assert(in_array('-i', $cmd, true), 'has -i flag');
-                $hostArg = $cmd[array_search('pgnusr@10.129.2.112; rm -rf /', $cmd, true) ?: -1] ?? null;
-                sac_assert_eq($hostArg, 'pgnusr@10.129.2.112; rm -rf /', 'the malicious-looking host string is ONE argv element, never split/interpreted');
+                $hostArg = $cmd[array_search('glpiadmin@10.99.2.112; rm -rf /', $cmd, true) ?: -1] ?? null;
+                sac_assert_eq($hostArg, 'glpiadmin@10.99.2.112; rm -rf /', 'the malicious-looking host string is ONE argv element, never split/interpreted');
                 sac_assert_eq(end($cmd), 'cat ' . escapeshellarg('/var/lib/sac/oscap_summary.txt'), 'remote command is the last argv element, shell-escaped for defence in depth even though the remote forced-command ignores it');
 
-                $destIndex = array_search('pgnusr@10.129.2.112; rm -rf /', $cmd, true);
+                $destIndex = array_search('glpiadmin@10.99.2.112; rm -rf /', $cmd, true);
                 sac_assert_eq($cmd[$destIndex - 1], '--', 'a "--" end-of-options marker immediately precedes the destination, so ssh can never read it as a flag');
             },
 
@@ -252,12 +252,12 @@ final class SshSummaryReader
                     '/etc/sac-collect/sac_collect_key',
                     '/etc/sac-collect/known_hosts',
                     "-oProxyCommand=sh -c 'id>/tmp/pwn'",
-                    '10.129.2.112',
+                    '10.99.2.112',
                     22,
                     '/var/lib/sac/oscap_summary.txt',
                     15
                 );
-                $dashUserIndex = array_search("-oProxyCommand=sh -c 'id>/tmp/pwn'@10.129.2.112", $cmd, true);
+                $dashUserIndex = array_search("-oProxyCommand=sh -c 'id>/tmp/pwn'@10.99.2.112", $cmd, true);
                 sac_assert($dashUserIndex !== false, 'the dangerous-looking destination is present as a single argv element');
                 sac_assert_eq($cmd[$dashUserIndex - 1], '--', '"--" precedes it, so ssh treats it as a literal destination, never as -oProxyCommand=...');
             },
@@ -273,9 +273,9 @@ final class SshSummaryReader
             },
 
             'sshreader/is-safe-ssh-identifier' => static function (): void {
-                sac_assert(SshSummaryReader::isSafeSshIdentifier('pgnusr'), 'plain username is safe');
-                sac_assert(SshSummaryReader::isSafeSshIdentifier('10.129.2.112'), 'IPv4 address is safe');
-                sac_assert(SshSummaryReader::isSafeSshIdentifier('vm-dev-damara'), 'hyphenated hostname is safe');
+                sac_assert(SshSummaryReader::isSafeSshIdentifier('glpiadmin'), 'plain username is safe');
+                sac_assert(SshSummaryReader::isSafeSshIdentifier('10.99.2.112'), 'IPv4 address is safe');
+                sac_assert(SshSummaryReader::isSafeSshIdentifier('vm-server-08'), 'hyphenated hostname is safe');
                 sac_assert(!SshSummaryReader::isSafeSshIdentifier('-oProxyCommand=x'), 'a leading dash is rejected');
                 sac_assert(!SshSummaryReader::isSafeSshIdentifier(''), 'empty string is rejected');
                 sac_assert(!SshSummaryReader::isSafeSshIdentifier('host; rm -rf /'), 'shell metacharacters are rejected');
@@ -294,13 +294,13 @@ final class SshSummaryReader
                     'timeout_seconds'  => 5,
                 ];
                 $result = SshSummaryReader::fetchRaw(
-                    ['host' => '10.129.2.112', 'port' => 22, 'ssh_user' => '-oProxyCommand=x'],
+                    ['host' => '10.99.2.112', 'port' => 22, 'ssh_user' => '-oProxyCommand=x'],
                     $sshConfig
                 );
                 sac_assert($result === null, 'an unsafe ssh_user is rejected before ssh is ever invoked');
 
                 $result2 = SshSummaryReader::fetchRaw(
-                    ['host' => '-oProxyCommand=x', 'port' => 22, 'ssh_user' => 'pgnusr'],
+                    ['host' => '-oProxyCommand=x', 'port' => 22, 'ssh_user' => 'glpiadmin'],
                     $sshConfig
                 );
                 sac_assert($result2 === null, 'an unsafe host is rejected before ssh is ever invoked');

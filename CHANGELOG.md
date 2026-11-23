@@ -7,7 +7,7 @@ this release records every failing rule by name, tracks it until it is fixed, an
 sends it to `riskregister` as an affected area of the host's Finding.
 
 Verified end to end on 2026-10-25: the wrapper produced 57 rule lines on
-`vm-dev-damara` (Oracle Linux 9.3), matching the scan's own `fail` count, and
+`vm-server-08` (Oracle Linux 9.3), matching the scan's own `fail` count, and
 after deployment GLPI held 57 rules with 54 carrying CIS references, with no
 control linked automatically — correct, since the content cites CIS Controls v7
 and `riskregister` holds only v8.
@@ -417,7 +417,7 @@ failed) — the first run since the tool could boot again in 1.4.0.
 
 ### Fixed
 
-- **Shared "PGN Suite" tab (`lib/pgnsuite/ConfigTab.php`) had an unreadable
+- **Shared "ICT Tools" tab (`lib/pgnsuite/ConfigTab.php`) had an unreadable
   active sub-tab** — pale-yellow text on `.nav-pills` active state. Visual
   fix only, approved by the suite maintainers upstream (hub §5, canonical
   copy now r2, SHA-256 `347d56c91508e53326c8d4de74105628d0fd535bde619fe8a94eb147a448cbd6`).
@@ -449,7 +449,7 @@ failed) — the first run since the tool could boot again in 1.4.0.
 
 ### Fixed
 
-- **v1.3.0's standalone config page always redirected to the shared PGN
+- **v1.3.0's standalone config page always redirected to the shared ORG
   Suite tab after saving — stranding the one user it exists for.** A user
   with `plugin_sac_config` but not core `config` READ has no route to
   Setup > General at all; unconditionally redirecting them to
@@ -465,7 +465,7 @@ failed) — the first run since the tool could boot again in 1.4.0.
 
 ### Added
 
-- **SAC's Setup screen joins the shared "PGN Suite" tab** on Setup > General
+- **SAC's Setup screen joins the shared "ICT Tools" tab** on Setup > General
   (hub §5 contract) — one tab, one vertical sub-tab per plugin. New
   `lib/pgnsuite/ConfigTab.php` (byte-identical copy of the canonical suite
   file, SHA-256 verified before committing — never edit this file directly,
@@ -667,7 +667,7 @@ failed) — the first run since the tool could boot again in 1.4.0.
 
 ## [1.1.1] - 2026-09-12
 
-First real v1.1.0 upgrade attempt on VM-HQ-GLPI failed with `Attempted to
+First real v1.1.0 upgrade attempt on VM-SERVER-22 failed with `Attempted to
 call an undefined method named "indexExists" of class "DB"` inside
 `Migration::migrateEolmapVersionKey()`.
 
@@ -679,7 +679,7 @@ call an undefined method named "indexExists" of class "DB"` inside
   before any of the v1.1.0 schema/data migration ran. Replaced with a new
   `Migration::keyExists()` using a direct `SHOW KEYS FROM <table>` query,
   which needs no database/schema name at all (also sidesteps hardcoding
-  `TABLE_SCHEMA = 'glpi'` — VM-HQ-GLPI's actual database is `itsm`, per the
+  `TABLE_SCHEMA = 'glpi'` — VM-SERVER-22's actual database is `itsm`, per the
   suite-wide `nvd` 2.4.1 gotcha). `Migration::install()` is idempotent, so a
   VM that hit this crash mid-upgrade (partially migrated: the
   `operatingsystemversions_id` column may already be present, the key swap
@@ -764,7 +764,7 @@ single `operatingsystems_id` ("Oracle") spanning Oracle Linux 7.x through
 
 ## [1.0.1] - 2026-09-10
 
-First real deploy on VM-HQ-GLPI (GLPI 11) surfaced three schema-drift bugs.
+First real deploy on VM-SERVER-22 (GLPI 11) surfaced three schema-drift bugs.
 
 ### Fixed
 

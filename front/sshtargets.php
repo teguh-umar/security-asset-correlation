@@ -16,7 +16,7 @@ if (isset($_POST['add'])) {
     $cid  = (int) ($_POST['computers_id'] ?? 0);
     $host = trim((string) ($_POST['host'] ?? ''));
     $port = (int) ($_POST['port'] ?? 22);
-    $user = trim((string) ($_POST['ssh_user'] ?? 'pgnusr'));
+    $user = trim((string) ($_POST['ssh_user'] ?? 'glpiadmin'));
 
     // Left blank on purpose = "use what GLPI already knows". Inventory has
     // already collected this Computer's addresses; making an admin retype

@@ -47,7 +47,7 @@ that is `riskregister`'s job. SAC's responsibility ends at a well-formed `Findin
 | Menu | own **top-level sidebar sector** — `$PLUGIN_HOOKS['menu_toadd']['sac'] = ['sac' => [Menu::class]]` |
 | Cron | `GlpiPlugin\Sac\Cron` with actions `EolScan`, `EolCacheRefresh`, `LicenseScan` |
 | `csrf_compliant` | `$PLUGIN_HOOKS['csrf_compliant']['sac'] = true` |
-| `author` / `license` | `'PGN ICT'` / `'GPL-3.0-or-later'` (suite directive) |
+| `author` / `license` | `'ICT'` / `'GPL-3.0-or-later'` (suite directive) |
 
 Files: `setup.php`, `composer.json`, `hook.php` (install/uninstall), `src/*.php`,
 `templates/*.html.twig`, `front/*.php`, `ajax/*.php`, `install/data/*.csv` (seeds),
@@ -460,7 +460,7 @@ exit on any FAIL. Each check seeds throwaway rows and tears them down.
 
 ## 10. Deployment & VM verification checklist
 
-Prereqs on VM-HQ-GLPI (hub §3): deploy to `/data/www/glpi/plugins/sac`, restart
+Prereqs on VM-SERVER-22 (hub §3): deploy to `/var/www/glpi/plugins/sac`, restart
 php-fpm, `bin/console glpi:plugin:install sac --username=<admin>` +
 `glpi:plugin:activate sac`, check `files/_log/php-errors.log`.
 

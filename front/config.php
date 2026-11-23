@@ -75,7 +75,7 @@ if (isset($_POST['update'])) {
         \Config::setConfigurationValues(Config::CONTEXT, $save);
         Session::addMessageAfterRedirect(__('Updated', 'sac'));
     }
-    // Both the standalone page and the shared PGN Suite tab post here.
+    // Both the standalone page and the shared ICT Tools tab post here.
     // `_from_pgnsuite` (set only by the tab's render, see SuiteConfig::render())
     // tells us which one: a tab-originated save redirects back to the tab
     // (hub §5 contract); the standalone page must Html::back() instead — a

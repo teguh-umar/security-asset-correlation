@@ -103,7 +103,7 @@ too, is in [docs/GRCMANAGER-COMPARISON.md](docs/GRCMANAGER-COMPARISON.md).
 
 ```bash
 # Copy the plugin into the GLPI plugins directory
-cp -r . /data/www/glpi/plugins/sac
+cp -r . /var/www/glpi/plugins/sac
 
 # Install and activate
 php bin/console glpi:plugin:install sac --username=<admin>
@@ -117,8 +117,8 @@ build (`BadRequestHttpException` at `front/plugin.form.php`). Upgrade from the C
 instead:
 
 ```bash
-sudo -u nginx php /data/www/glpi/bin/console plugin:install sac --force
-sudo -u nginx php /data/www/glpi/bin/console plugin:activate sac
+sudo -u nginx php /var/www/glpi/bin/console plugin:install sac --force
+sudo -u nginx php /var/www/glpi/bin/console plugin:activate sac
 ```
 
 `--force` is required for an already-installed plugin. `plugin_sac_install()` is

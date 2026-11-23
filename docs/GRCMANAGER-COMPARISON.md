@@ -4,7 +4,7 @@
 
 > This is a copy of `docs/PLUGIN-REFERENCE.md` in the grcbridge repository, which is the maintained version. Update that file first, then copy it here.
 
-Reference for the PGN suite plugins that grcbridge connects to grcmanager. It answers one question: can
+Reference for the ORG suite plugins that grcbridge connects to grcmanager. It answers one question: can
 grcmanager replace riskregister, SAC or NVD? **No.** grcmanager is a GRC/ISMS layer that overlaps partly
 with riskregister and barely with SAC and NVD, so our plugins keep collecting and storing the data and
 grcbridge sends the results to grcmanager.

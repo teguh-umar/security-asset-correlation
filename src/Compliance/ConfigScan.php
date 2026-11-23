@@ -430,7 +430,7 @@ final class ConfigScan
                         'computers_id' => $cid,
                         'host'         => '10.0.0.5',
                         'port'         => 22,
-                        'ssh_user'     => 'pgnusr',
+                        'ssh_user'     => 'glpiadmin',
                         'is_active'    => 1,
                     ]);
                     $targets = self::activeTargets(null);
@@ -440,7 +440,7 @@ final class ConfigScan
                     }
                     sac_assert($match !== null, 'active target found');
                     sac_assert_eq($match['host'], '10.0.0.5', 'host carried through the join');
-                    sac_assert_eq($match['ssh_user'], 'pgnusr', 'ssh_user carried through the join');
+                    sac_assert_eq($match['ssh_user'], 'glpiadmin', 'ssh_user carried through the join');
                     sac_assert_eq($match['name'], '__sac_sc_target_host__', 'computer name carried through the join');
 
                     $DB->update('glpi_plugin_sac_sshtargets', ['is_active' => 0], ['computers_id' => $cid]);

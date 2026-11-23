@@ -75,13 +75,13 @@ agreement; where this plan and they disagree, they win.
   lives there) and omits `framework_refs` entirely when the content produced none.
 - **riskregister 2.1.0-rc1 is built but NOT deployed.** Code against the contract,
   keep the `method_exists()` guard, and do not assume the method exists at runtime
-  until the user confirms it on VM-HQ-GLPI.
+  until the user confirms it on VM-SERVER-22.
 - **No `authorized_keys` change on any host.** If a task seems to need one, stop:
   that is Design B, which was explicitly rejected.
 - Existing suite rules still bind: `timestamp NULL DEFAULT NULL`, `'fkey'` (never
   `'integer'`) for FK-shaped columns, Twig autoescaped with no `|raw` on plugin
   data, `cache:clear` after any `.twig` change, and §0 rule 8 (ship as
-  `1.8.0-rc1`, promote only after the user confirms on VM-HQ-GLPI).
+  `1.8.0-rc1`, promote only after the user confirms on VM-SERVER-22).
 
 ## Review Focus
 
@@ -149,7 +149,7 @@ grep -o 'href="[^"]*"' /usr/share/xml/scap/ssg/content/ssg-ol9-ds.xml \
   | sort | uniq -c | sort -rn | head -20
 ```
 
-- [x] **ANSWER — recon run on `vm-dev-damara` (Oracle Linux 9), 2026-10-22.**
+- [x] **ANSWER — recon run on `vm-server-08` (Oracle Linux 9), 2026-10-22.**
 
   The content dir holds two datastreams, `ssg-firefox-ds.xml` and
   `ssg-ol9-ds.xml` (16 MB, dated Sep 2023). The wrapper's product-exclusion
@@ -1059,7 +1059,7 @@ git commit -m "feat(sac): add the per-host rule checklist page"
 
 These change **fresh installs only** — verified against core: `CronTask::register()`
 returns early for an already-registered task, and `Config::setDefaults()` only
-writes missing keys. VM-HQ-GLPI was already changed through the UI.
+writes missing keys. VM-SERVER-22 was already changed through the UI.
 
 - [x] **Step 1: Write the failing test** — add to `Config::selfChecks()`:
 
@@ -1133,7 +1133,7 @@ import re
 CIS_HREFS = {
     # href substring            -> riskregister framework shortname
     'cisecurity.org/controls/': 'CISv7',
-    #   ^ confirmed on vm-dev-damara, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
+    #   ^ confirmed on vm-server-08, ssg-ol9-ds.xml (Sep 2023), 2026-10-22:
     #     bare integer codes, observed set 1-9,11-16,18-20. Codes reaching 20
     #     is what identifies v7 (v8 has 18 controls).
     # Add a v8 entry ONLY after running the Task 1 recon on a host that has it.
@@ -1205,7 +1205,7 @@ for r in rules:
         r['id'], r['result'], r['severity'], refs.get(r['id'], ''), title))
 ```
 
-- [x] **Step 4: Verify on a host** — DONE 2026-10-25 on `vm-dev-damara` (OL 9.3) with 1.8.0-rc3: `Per-rule lines: 57`, matching `fail=57` in the summary, 58 lines total. rc1 produced the same 57 lines, so the rewritten memory-bounded parser is confirmed byte-equivalent on the real 16 MB datastream, not only on fixtures.
+- [x] **Step 4: Verify on a host** — DONE 2026-10-25 on `vm-server-08` (OL 9.3) with 1.8.0-rc3: `Per-rule lines: 57`, matching `fail=57` in the summary, 58 lines total. rc1 produced the same 57 lines, so the rewritten memory-bounded parser is confirmed byte-equivalent on the real 16 MB datastream, not only on fixtures.
 
 ```bash
 sudo /usr/local/sbin/sac-oscap-summary.sh
@@ -1218,7 +1218,7 @@ count is roughly `fail + error` + 1. Then confirm the pull still works unchanged
 
 ```bash
 sudo -u nginx ssh -i /etc/sac-collect/sac_collect_key \
-  -o UserKnownHostsFile=/etc/sac-collect/known_hosts pgnusr@<host>
+  -o UserKnownHostsFile=/etc/sac-collect/known_hosts glpiadmin@<host>
 ```
 
 Expected: the whole multi-line payload, no `authorized_keys` change needed.

@@ -3,7 +3,7 @@
 namespace GlpiPlugin\Sac;
 
 /**
- * Provider for the shared "PGN Suite" tab on Setup > General
+ * Provider for the shared "ICT Tools" tab on Setup > General
  * (`\GlpiPlugin\Pgnsuite\ConfigTab`, hub §5 contract) — SAC's own section
  * inside that tab.
  *
@@ -39,7 +39,7 @@ final class SuiteConfig
     }
 
     /**
-     * Entry point for the shared PGN Suite tab specifically (the `render`
+     * Entry point for the shared ICT Tools tab specifically (the `render`
      * callback in {@see section()}) — as opposed to `front/config.php`
      * calling `render()` directly for the standalone page. See `render()`'s
      * docblock for why the distinction matters.

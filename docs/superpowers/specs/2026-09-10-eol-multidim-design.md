@@ -33,7 +33,7 @@ row in `glpi_items_operatingsystems` carrying up to six independent dropdown FKs
 | `operatingsystemarchitectures_id` | arch (x86_64, …) |
 | `operatingsystemkernelversions_id` | kernel build |
 
-On VM-HQ-GLPI the `operatingsystems_id` dimension alone is **not** an EOL key: a
+On VM-SERVER-22 the `operatingsystems_id` dimension alone is **not** an EOL key: a
 single `operatingsystems_id` (`53`, name "Oracle") spans Oracle Linux 7.x through
 9.7 across the fleet. SAC v1.0.x keyed `_eolmap`, the Finding `code`
 (`SAC-EOL-OS-<os_id>`) and the Reconcile row all on `operatingsystems_id`, so one

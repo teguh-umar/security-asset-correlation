@@ -4,7 +4,7 @@
 > Topik: eksplorasi GLPI untuk security assessment/korelasi, desain modul SAC
 > (EOL/EOS, License Compliance, Patch Compliance, Config Compliance via OpenSCAP),
 > korelasi dengan plugin `riskregister` dan `integrasipaman`, penyusunan urutan
-> verifikasi deployment `riskregister` di VM-HQ-GLPI.
+> verifikasi deployment `riskregister` di VM-SERVER-22.
 
 ---
 
@@ -16,7 +16,7 @@ apakah GLPI bisa digunakan untuk security assessment, seperti korelasi CVE denga
 
 Secara native, GLPI **bukan** tool security assessment atau vulnerability scanner — dia core-nya adalah asset & ITSM management. Tapi GLPI bisa jadi *pusat korelasi* CVE-ke-aset kalau digabung dengan komponen lain, bukan berdiri sendiri.
 
-Dijelaskan pola umum: scanner terpisah (Nessus/OpenVAS/Qualys/Wazuh) melakukan scanning → middleware/script membaca API scanner → mencocokkan temuan ke aset GLPI via IP/hostname → membuat/update record via GLPI REST API (`POST /apirest.php/Ticket`, `PUT /apirest.php/Computer/{id}`). Disebut relevansi ke `glpi_webhook_middleware.py` (OpManager→GLPI→FreshService, di `10.129.10.95:8088`) dan `asset_compare.py` (fuzzy matching) yang sudah pernah dibangun sebelumnya — polanya bisa direuse, tinggal ganti sumber data dari OpManager jadi output scanner.
+Dijelaskan pola umum: scanner terpisah (Nessus/OpenVAS/Qualys/Wazuh) melakukan scanning → middleware/script membaca API scanner → mencocokkan temuan ke aset GLPI via IP/hostname → membuat/update record via GLPI REST API (`POST /apirest.php/Ticket`, `PUT /apirest.php/Computer/{id}`). Disebut relevansi ke `glpi_webhook_middleware.py` (OpManager→GLPI→FreshService, di `10.99.10.95:8088`) dan `asset_compare.py` (fuzzy matching) yang sudah pernah dibangun sebelumnya — polanya bisa direuse, tinggal ganti sumber data dari OpManager jadi output scanner.
 
 ---
 
@@ -170,7 +170,7 @@ Ditanya klarifikasi apakah ini pengganti rencana Risk Register di PAMAN, dan apa
 2. lebih baik sebgai plugin GLPI.
 
 ke-3 plugins ini akan lebih baik saling berkorelasi.
-C:\Users\teguh.umar\OneDrive - PT Pertamina (Persero)\Documents\Risk Register Dashboard\docs\superpowers\plans\2026-08-29-glpi-risk-register-plugin.md adalah RIsk-Register-dashboard plugins
+C:\Users\<user>\<onedrive>\Documents\Risk Register Dashboard\docs\superpowers\plans\2026-08-29-glpi-risk-register-plugin.md adalah RIsk-Register-dashboard plugins
 
 ## 🤖 Claude
 
@@ -304,7 +304,7 @@ ini adalah script membangun RISK-REgister-Dashboard
 
 **Koreksi penting:** `FindingInjection` (datainjection) berstatus **DORMANT** — belum ada versi kompatibel GLPI 11. Jalur yang benar-benar bekerja: `php tools/import_toolkit.php` (dari CSV) + halaman Management → Risk Register → Reconcile.
 
-Urutan wajib sebelum SAC dibangun: deploy ke `/data/www/glpi/plugins/` di VM-HQ-GLPI (`10.129.2.174` via JumpServer) → install+activate → jalankan `verification-checklist.md` (327 baris, 16 area) + `selfcheck.php` → cek `php-errors.log`. 3 titik risiko instalasi pertama: re-entrancy `include`, signature `getSpecificValueToDisplay`, dashboard twig `@riskregister`. Backlog non-blocking dicatat juga.
+Urutan wajib sebelum SAC dibangun: deploy ke `/var/www/glpi/plugins/` di VM-SERVER-22 (`10.99.2.174` via JumpServer) → install+activate → jalankan `verification-checklist.md` (327 baris, 16 area) + `selfcheck.php` → cek `php-errors.log`. 3 titik risiko instalasi pertama: re-entrancy `include`, signature `getSpecificValueToDisplay`, dashboard twig `@riskregister`. Backlog non-blocking dicatat juga.
 
 ---
 
@@ -320,14 +320,14 @@ sebelum menyusun urutan verifikasi ceklist ini adalah transkirp dari plugin GLPI
 
 Plugin ke-4 ditemukan: **`integrasipaman`** (JumpServer Integration Dashboard) — GLPI 11 plugin, sudah **live di produksi** (v1.11.0), menghubungkan GLPI ke Fit2Cloud JumpServer PAM API, korelasi asset/user, evaluasi risk command terminal.
 
-**Fakta infra krusial** (dari pengalaman deploy nyata di server yang sama, VM-HQ-GLPI, relevan untuk verifikasi `riskregister`):
-- Tidak ada `bin/console` cron — pakai `sudo -u nginx php /data/www/glpi/front/cron.php <N>`
+**Fakta infra krusial** (dari pengalaman deploy nyata di server yang sama, VM-SERVER-22, relevan untuk verifikasi `riskregister`):
+- Tidak ada `bin/console` cron — pakai `sudo -u nginx php /var/www/glpi/front/cron.php <N>`
 - php-fpm timeout ~490s — operasi berat lewat CLI
 - Tidak ada tmux/screen — pakai `nohup`/`setsid`
 - Crontab sistem awalnya kosong, perlu `/etc/cron.d/glpi` manual
 - **`datainjection` plugin SUDAH terinstall** di server ini (kabar baik untuk `FindingInjection`)
-- Akses via bastion JumpServer (`paman.pgn.co.id:2222`)
-- DB credentials di `/data/www/glpi/config/config_db.php`
+- Akses via bastion JumpServer (`paman.example.org:2222`)
+- DB credentials di `/var/www/glpi/config/config_db.php`
 
 Pola `correlation.class.php` (resolver string aset/user → GLPI-native, dengan generation counter) dicatat relevan sebagai referensi desain untuk masalah asset-matching di modul SAC.
 
@@ -339,7 +339,7 @@ take out PAMAN yang menggunakan FastAPI, karena bukan plugins di GLPI
 
 ## 🤖 Claude
 
-Peta sistem direvisi — PAMAN dikeluarkan (bukan plugin GLPI, consumer eksternal beda kelas). Fokus murni 3 komponen GLPI-native: SAC, `riskregister`, `integrasipaman`, semua jalan di satu instance GLPI 11 (VM-HQ-GLPI).
+Peta sistem direvisi — PAMAN dikeluarkan (bukan plugin GLPI, consumer eksternal beda kelas). Fokus murni 3 komponen GLPI-native: SAC, `riskregister`, `integrasipaman`, semua jalan di satu instance GLPI 11 (VM-SERVER-22).
 
 **Urutan Verifikasi `riskregister` disusun (7 tahap, 18 langkah)**, mengadaptasi fakta infra dari deploy `integrasipaman`:
 0. Prasyarat akses (bastion JumpServer)

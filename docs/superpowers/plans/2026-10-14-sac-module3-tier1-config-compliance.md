@@ -1356,7 +1356,7 @@ Expected: PASS — the page file now exists, so the `page exists` loop assertion
 succeeds for every option including `compliance`.
 
 Manual confirmation (not scriptable offline): load `front/compliance.php` in a
-browser against VM-HQ-GLPI as a user with `plugin_sac_finding` READ and confirm
+browser against VM-SERVER-22 as a user with `plugin_sac_finding` READ and confirm
 the page renders with no PHP warnings, both with zero rows and with at least
 one seeded `glpi_plugin_sac_configscan` row.
 
@@ -1372,7 +1372,7 @@ git commit -m "feat(sac): add the config-compliance list page"
 ### Task 12: VM fact-finding — confirm the GLPI Inventory Collect schema
 
 **Not a code task** — a manual reconnaissance step the user runs against
-VM-HQ-GLPI, because `CollectReader` (Task 7) was written against a documented
+VM-SERVER-22, because `CollectReader` (Task 7) was written against a documented
 guess (Global Constraints). This is the same category of step the project
 already went through for Module 1's `fields` LifeCycle table name
 (project-brief §6.1.2.a).

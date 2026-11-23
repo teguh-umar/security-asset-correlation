@@ -8,7 +8,7 @@ Module 2 decides whether installed software needs a licence by looking at its
 **publisher**. On Oracle Linux that is wrong in a way that destroys the module's
 usefulness, and the data says so plainly.
 
-Measured on `vm-dev-damara` (Computer 136) on 2026-10-25:
+Measured on `vm-server-08` (Computer 136) on 2026-10-25:
 
 | | |
 |---|---|
@@ -36,7 +36,7 @@ queue instead of asserting something false about it.
 ## Goals
 
 1. **No Finding is raised for software that needs no licence.** The 817 false
-   Findings on `vm-dev-damara`, and their equivalents on every other Linux host,
+   Findings on `vm-server-08`, and their equivalents on every other Linux host,
    stop existing.
 2. **Nothing unknown is silently dropped.** Software from a commercial publisher
    that matches no rule stays visible in a review queue. Invisible is not the
@@ -92,7 +92,7 @@ Things that would make this a failure even if it technically works:
 - **riskregister 2.1.0 is on production** and already receives SAC Findings.
 - **Version-pattern matching alone is not safe.** Evidence: a `.el<N>` rule misses
   RHEL *modular* packages, which are versioned `8.1.27-1.module+el9.3.0+90130+…`
-  — note `+el9`, not `.el9`. Eleven PHP packages on `vm-dev-damara` take exactly
+  — note `+el9`, not `.el9`. Eleven PHP packages on `vm-server-08` take exactly
   that form. A rule written on the obvious pattern would leave precisely those as
   Findings, with no clue why PHP alone survived. **This case is a required test.**
 - **The existing ignore-categories setting cannot solve this and must stay.**

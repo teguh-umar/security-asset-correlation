@@ -344,8 +344,8 @@ final class AssetResolver
                     // inventory.
                     foreach ([
                         ['name' => '127.0.0.1',    'version' => 4],
-                        ['name' => '10.129.2.112', 'version' => 4],
-                        ['name' => '10.129.2.200', 'version' => 4],
+                        ['name' => '10.99.2.112', 'version' => 4],
+                        ['name' => '10.99.2.200', 'version' => 4],
                         ['name' => 'fe80::1',      'version' => 6],
                     ] as $seed) {
                         $DB->insert('glpi_ipaddresses', $seed + [
@@ -359,12 +359,12 @@ final class AssetResolver
                     }
 
                     $ips = self::ipAddressesForComputer($cid);
-                    sac_assert_eq($ips, ['10.129.2.112', '10.129.2.200'], 'returns the routable IPv4 addresses, in GLPI order');
+                    sac_assert_eq($ips, ['10.99.2.112', '10.99.2.200'], 'returns the routable IPv4 addresses, in GLPI order');
                     sac_assert(!in_array('127.0.0.1', $ips, true), 'loopback excluded — never the address to SSH to');
                     sac_assert(!in_array('fe80::1', $ips, true), 'IPv6 excluded — the SSH target validation would reject it anyway');
 
-                    $DB->update('glpi_ipaddresses', ['is_deleted' => 1], ['mainitems_id' => $cid, 'name' => '10.129.2.112']);
-                    sac_assert_eq(self::ipAddressesForComputer($cid), ['10.129.2.200'], 'a soft-deleted address drops out');
+                    $DB->update('glpi_ipaddresses', ['is_deleted' => 1], ['mainitems_id' => $cid, 'name' => '10.99.2.112']);
+                    sac_assert_eq(self::ipAddressesForComputer($cid), ['10.99.2.200'], 'a soft-deleted address drops out');
 
                     sac_assert_eq(self::ipAddressesForComputer(2147480996), [], 'a computer with no addresses returns an empty list, not an error');
                 } finally {

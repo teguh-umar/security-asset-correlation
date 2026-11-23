@@ -6,7 +6,7 @@ Compliance Correlation (ACC)**, scheduled after v1.1.0 is VM-verified (§12).
 **Session:** `sec-assessmant-korelasi-cve-78` `[5c886d]` (was `-cc`)
 **Status:** v1.1.0 merged to `main` and pushed (commit `0824247`,
 2026-09-12) — Modules 1 & 2 code-complete through the EOL multidim
-re-keying; **not yet run on VM-HQ-GLPI** (v1.0.x was; the v1.1.0 upgrade
+re-keying; **not yet run on VM-SERVER-22** (v1.0.x was; the v1.1.0 upgrade
 pass is still pending). Module 3 (Config/Patch Compliance) not started.
 **Last updated:** 2026-09-12
 
@@ -163,14 +163,14 @@ as updated by `risk-register-dashboard-06` on 2026-09-03):
 - **CSV export** is kept as a **secondary / audit** output only (and for the
   external-evidence use case, e.g. the server-refresh KAK). Not the pipeline.
 - **`datainjection` / `FindingInjection` is dormant** — not used unless a
-  VM-HQ-GLPI check proves GLPI 11 injection types work.
+  VM-SERVER-22 check proves GLPI 11 injection types work.
 - **Risk categories** — riskregister **v1.1.0** (shipped 2026-09-03, tag `1.1.0`,
   merge `7619e40`) seeds 4 flat `RiskCategory` names: `Obsolescence` (M1),
   `License Compliance` (M2), `Patch Compliance` (M3 patch),
   `Configuration Compliance` (M3 config). SAC calls
   `ImportSupport::categoryIdByName()` with these exact strings.
   **`categoryIdByName()` returns 0 on miss — it does NOT auto-create.** So until
-  v1.1.0 is deployed on VM-HQ-GLPI, SAC Findings get category 0 (uncategorized) —
+  v1.1.0 is deployed on VM-SERVER-22, SAC Findings get category 0 (uncategorized) —
   harmless, self-corrects on deploy. SAC must tolerate a 0 return.
 - **CIS mapping:** SCAP `<reference>` CIS sub-control refs (e.g. `5.2`) truncate
   to the parent control number to match `riskregister`'s seeded `cis_v8.csv`
@@ -356,15 +356,15 @@ Cron task `GlpiPlugin\Sac\Cron::LicenseScan`, **weekly**. Gated on
   by ratio; teardown.
 - `GlpiPlugin\Sac\Cron::LicenseScan` — weekly.
 
-## 8. Deployment target — VM-HQ-GLPI
+## 8. Deployment target — VM-SERVER-22
 
 Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
 2026-09-03). Facts that constrain SAC (hub §3):
 
-- Host `10.129.2.174` via JumpServer bastion `paman.pgn.co.id:2222`
-- GLPI root `/data/www/glpi`, plugins at `/data/www/glpi/plugins/<name>`
+- Host `10.99.2.174` via JumpServer bastion `paman.example.org:2222`
+- GLPI root `/var/www/glpi`, plugins at `/var/www/glpi/plugins/<name>`
 - nginx + php-fpm **~490 s request timeout** — heavy correlation runs from CLI
-- **No `bin/console` cron.** `sudo -u nginx php /data/www/glpi/front/cron.php <N>`
+- **No `bin/console` cron.** `sudo -u nginx php /var/www/glpi/front/cron.php <N>`
   — **numeric count only**; a task name casts to 0. Force one task via Setup →
   Automatic actions → Execute, or let the every-minute system cron pick it up.
 - `bin/console glpi:plugin:install|activate|list` **do** exist
@@ -402,13 +402,13 @@ Shared with `integrasipaman` (live) and `riskregister` (first real VM run passed
   container on Operating Systems), `tag`, `telegrambot`
 - **`addressing` plugin** (`glpi_plugin_addressing_addressings`, `begin_ip..end_ip`,
   `is_deleted`-guarded) is the production-scope source on the VM — **not** core
-  `glpi_ipnetworks`. Named ranges: "Prodcution IT" 10.129.10.1–10.129.11.254,
-  "Production OT" 10.129.18.0–10.129.19.254. SAC module 3 uses this for asset
+  `glpi_ipnetworks`. Named ranges: "Prodcution IT" 10.99.10.1–10.99.11.254,
+  "Production OT" 10.99.18.0–10.99.19.254. SAC module 3 uses this for asset
   scoping.
 - **No local GLPI runtime** — `C:\php\php.exe` is PHP 8.4 CLI, no mbstring, no
   php.ini. `php -l` + offline stubs only. Runtime verification = a pass on
-  VM-HQ-GLPI with the user running commands.
-- **Author/license** (SUITE DIRECTIVE, hub §7): `setup.php` `'author' => 'PGN ICT'`,
+  VM-SERVER-22 with the user running commands.
+- **Author/license** (SUITE DIRECTIVE, hub §7): `setup.php` `'author' => 'ICT'`,
   `'license' => 'GPL-3.0-or-later'`; `composer.json` `"GPL-3.0-or-later"`; repo
   `LICENSE` = full GPL-3.0 text (done); README/CHANGELOG → `GPL-3.0-or-later`; no
   file-header retrofit.
@@ -506,7 +506,7 @@ Still open (VM-verification facts, not design):
   `ACC/eol`/`ACC/license`, twig namespace `@acc`, plugin folder + repo.
   **Scheduled as its own plan after v1.1.0 is deployed and verified on the
   VM** — v1.1.0 (EOL multidim) is merged to `main` and pushed
-  (2026-09-12, commit `0824247`) but **not yet run on VM-HQ-GLPI**; doing the
+  (2026-09-12, commit `0824247`) but **not yet run on VM-SERVER-22**; doing the
   rename before that VM pass would stack two breaking migrations (table
   rename + Finding-code rename) into one upgrade. Needs its own migration
   (old `glpi_plugin_sac_*` tables/config/rights → new `acc_*` ones, old

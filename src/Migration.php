@@ -154,7 +154,7 @@ final class Migration
               `computers_id` int unsigned NOT NULL DEFAULT 0,
               `host` varchar(255) NOT NULL DEFAULT '',
               `port` int unsigned NOT NULL DEFAULT 22,
-              `ssh_user` varchar(100) NOT NULL DEFAULT 'pgnusr',
+              `ssh_user` varchar(100) NOT NULL DEFAULT 'glpiadmin',
               `is_active` tinyint(1) NOT NULL DEFAULT 1,
               `date_creation` timestamp NULL DEFAULT NULL,
               `date_mod` timestamp NULL DEFAULT NULL,
@@ -195,7 +195,7 @@ final class Migration
      * of this file called `$DB->indexExists(...)` and crashed a real VM
      * upgrade with "Attempted to call an undefined method named indexExists
      * of class DB". This checks directly via `SHOW KEYS`, which needs no
-     * database/schema name at all — deliberately, since VM-HQ-GLPI's actual
+     * database/schema name at all — deliberately, since VM-SERVER-22's actual
      * database is named `itsm`, not `glpi` (hub §3/§7 nvd 2.4.1 gotcha:
      * never hardcode `TABLE_SCHEMA = 'glpi'` in an `INFORMATION_SCHEMA`
      * query). `$table`/`$keyName` are always one of this file's own hardcoded
